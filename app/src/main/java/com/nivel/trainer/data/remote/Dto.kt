@@ -18,14 +18,60 @@ data class HealthResponse(
     val status: String,
 )
 
-/** Ученик тренера. Источник — `profiles` (role=student), отдаётся read-endpoint'ом A3. */
+/** Универсальный ответ-подтверждение write-эндпоинтов (`{ ok }`), напр. revoke invite. */
+@Serializable
+data class OkResponse(
+    val ok: Boolean = true,
+)
+
+/**
+ * Ответ `GET /api/v1/students` — обёртка `{ students: [...] }` (контракт A3,
+ * `src/app/api/v1/students/route.ts` в репо NIVEL). DTO выровнен по реальному
+ * хендлеру, а не по дизайн-доку.
+ */
+@Serializable
+data class StudentsResponse(
+    val students: List<StudentDto> = emptyList(),
+)
+
+/**
+ * Ученик тренера. Источник — `profiles` (role=student); счётчики `active_goals`
+ * / `total_sessions` считаются на сервере (`listStudentsCore`) и показываются в
+ * карточке списка один-в-один с вебом (`trainer/students/page.tsx`).
+ */
 @Serializable
 data class StudentDto(
     val id: String,
     val email: String? = null,
     @SerialName("full_name") val fullName: String? = null,
     @SerialName("avatar_url") val avatarUrl: String? = null,
+    @SerialName("active_goals") val activeGoals: Int = 0,
+    @SerialName("total_sessions") val totalSessions: Int = 0,
     @SerialName("created_at") val createdAt: String? = null,
+)
+
+/**
+ * Тело `POST /api/v1/students` — создание теневого ученика. Сервер сам выдаёт
+ * claim-токен/ссылку (email пустой до клейма учеником).
+ */
+@Serializable
+data class CreateStudentRequest(
+    @SerialName("full_name") val fullName: String,
+)
+
+/**
+ * Ответ создания теневого ученика и invite regenerate
+ * (`POST /api/v1/students` 201 и `…/invite/regenerate`):
+ * `{ ok, studentId, claimUrl, claimToken, expiresAt }` (`createShadowStudentCore`).
+ * `claimUrl` = `${NEXT_PUBLIC_NIVEL_URL}/invite/{token}`, её и шарим/копируем.
+ */
+@Serializable
+data class ShadowStudentResponse(
+    val ok: Boolean = true,
+    val studentId: String,
+    val claimUrl: String,
+    val claimToken: String,
+    val expiresAt: String? = null,
 )
 
 /** Тренировочная сессия ученика. Источник — `sessions`. */

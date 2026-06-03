@@ -16,6 +16,10 @@ data class StudentEntity(
     val fullName: String?,
     val email: String?,
     val avatarUrl: String?,
+    /** Счётчик активных целей с сервера (B4) — показывается в карточке списка. */
+    val activeGoals: Int = 0,
+    /** Счётчик сессий ученика с сервера (B4). */
+    val totalSessions: Int = 0,
     val createdAt: String?,
 )
 

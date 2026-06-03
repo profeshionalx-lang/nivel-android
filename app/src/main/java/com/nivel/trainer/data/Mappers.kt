@@ -5,8 +5,10 @@ import com.nivel.trainer.data.local.SessionEntity
 import com.nivel.trainer.data.local.StudentEntity
 import com.nivel.trainer.data.remote.InsightCardDto
 import com.nivel.trainer.data.remote.SessionDto
+import com.nivel.trainer.data.remote.ShadowStudentResponse
 import com.nivel.trainer.data.remote.StudentDto
 import com.nivel.trainer.domain.InsightCard
+import com.nivel.trainer.domain.ShadowStudent
 import com.nivel.trainer.domain.Student
 import com.nivel.trainer.domain.TrainingSession
 
@@ -26,6 +28,8 @@ fun StudentDto.toEntity() = StudentEntity(
     fullName = fullName,
     email = email,
     avatarUrl = avatarUrl,
+    activeGoals = activeGoals,
+    totalSessions = totalSessions,
     createdAt = createdAt,
 )
 
@@ -34,6 +38,16 @@ fun StudentEntity.toDomain() = Student(
     fullName = fullName,
     email = email,
     avatarUrl = avatarUrl,
+    activeGoals = activeGoals,
+    totalSessions = totalSessions,
+)
+
+/** Ответ создания теневого ученика / invite → доменная claim-модель для шаринга. */
+fun ShadowStudentResponse.toDomain() = ShadowStudent(
+    studentId = studentId,
+    claimUrl = claimUrl,
+    claimToken = claimToken,
+    expiresAt = expiresAt,
 )
 
 // --- Sessions ---

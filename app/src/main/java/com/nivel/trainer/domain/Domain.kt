@@ -12,6 +12,21 @@ data class Student(
     val fullName: String?,
     val email: String?,
     val avatarUrl: String?,
+    /** Кол-во активных целей (счётчик с сервера, показывается в карточке списка). */
+    val activeGoals: Int = 0,
+    /** Кол-во сессий ученика (счётчик с сервера). */
+    val totalSessions: Int = 0,
+)
+
+/**
+ * Результат создания теневого ученика / перевыпуска приглашения: claim-ссылка,
+ * которой тренер делится с учеником (share-intent / копирование).
+ */
+data class ShadowStudent(
+    val studentId: String,
+    val claimUrl: String,
+    val claimToken: String,
+    val expiresAt: String?,
 )
 
 /** Тренировочная сессия ученика. */

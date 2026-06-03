@@ -3,4 +3,6 @@
     <color name="nivel_primary">#1F6FEB</color>
     <color name="nivel_background">#FFFFFF</color>
     <color name="ic_launcher_background">#1F6FEB</color>
+    <!-- Фон splash-экрана — фирменный синий Nivel (== nivel_primary, == NivelBlue в ui/theme). -->
+    <color name="splash_background">#1F6FEB</color>
 </resources>

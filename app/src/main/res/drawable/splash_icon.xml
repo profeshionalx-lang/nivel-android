@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Иконка splash-экрана (Android 12+ SplashScreen API): белый знак «N» Nivel.
+  Фон задаётся темой (windowSplashScreenBackground = фирменный #1F6FEB).
+  Спецификация SplashScreen: канва 108dp, видимая зона иконки — внутренние
+  ~2/3 (центральные 72dp ≈ 18..90). Знак вписан в ≈30..78.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M33,30h8.5l18,27.5V30h10.5v48h-8.5l-18,-27.5V78h-10.5z" />
+</vector>

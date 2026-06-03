@@ -9,4 +9,16 @@
         <item name="android:statusBarColor">@color/nivel_primary</item>
         <item name="android:windowBackground">@color/nivel_background</item>
     </style>
+
+    <!--
+      Splash-тема (androidx.core:core-splashscreen, Android 12+ SplashScreen API
+      с бэкпортом до minSdk 26). Это стартовая тема launcher-activity: фон —
+      фирменный синий, по центру — белый знак «N». После старта приложение
+      переключается на Theme.Nivel через postSplashScreenTheme.
+    -->
+    <style name="Theme.Nivel.Splash" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">@color/splash_background</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/splash_icon</item>
+        <item name="postSplashScreenTheme">@style/Theme.Nivel</item>
+    </style>
 </resources>

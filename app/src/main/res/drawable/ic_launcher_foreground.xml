@@ -1,11 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  Foreground адаптивной иконки: фирменный знак «N» Nivel, белым по центру.
+  Viewport 108x108, safe-zone (всегда видимая) — центральные 66dp (≈21..87).
+  Знак вписан в ≈34..74, чтобы не обрезался ни маской-кругом, ни сжатием.
+  Готового PNG-лого нет — знак собран из инициала (см. правило 1 инициативы).
+-->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <!-- Простой знак "N" по центру safe-zone адаптивной иконки. -->
     <path
         android:fillColor="#FFFFFF"
-        android:pathData="M40,40h6l16,16V40h6v28h-6L46,52v16h-6z" />
+        android:pathData="M37,34h7.5l16,24.5V34h9.5v40h-7.5l-16,-24.5V74h-9.5z" />
 </vector>

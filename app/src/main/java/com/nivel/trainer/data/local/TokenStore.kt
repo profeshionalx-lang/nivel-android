@@ -17,7 +17,11 @@ private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(na
 /**
  * Хранилище bearer-JWT в DataStore (Preferences). Источник токена — обмен Firebase
  * ID token на бэкенде (см. B2/A2). Токен читается интерсептором и кладётся в
- * заголовок Authorization. Шифрование добавим при необходимости отдельной задачей.
+ * заголовок Authorization.
+ *
+ * TODO: CLAUDE.md требует шифрованное хранение токена («DataStore (encrypted)»).
+ * Каркас пишет JWT в обычный Preferences DataStore; шифрование (Tink/Jetpack
+ * Security поверх DataStore) добавить отдельной задачей до релиза (G-эпик).
  */
 @Singleton
 class TokenStore @Inject constructor(

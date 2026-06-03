@@ -12,6 +12,9 @@ import javax.inject.Inject
  * если токен сохранён. Токен берётся из DataStore (TokenStore). Чтение из Flow —
  * через runBlocking, т.к. интерсептор OkHttp синхронный; вызов идёт на фоновом
  * потоке OkHttp, не на main.
+ *
+ * TODO: кэшировать токен в памяти (StateFlow в TokenStore), чтобы не блокировать
+ * поток OkHttp чтением с диска на каждый запрос.
  */
 class AuthInterceptor @Inject constructor(
     private val tokenStore: TokenStore,

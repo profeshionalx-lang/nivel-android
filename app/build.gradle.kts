@@ -20,15 +20,13 @@ android {
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
-        // Базовый URL REST API бэкенда Nivel (репо NIVEL). Прод по умолчанию;
-        // для локальной разработки переопределяется в debug-сборке ниже.
+        // Базовый URL REST API бэкенда Nivel (репо NIVEL), прод по умолчанию.
+        // Для локальной разработки против `next dev` переопределить на
+        // "http://10.0.2.2:3000/" (эмулятор) — потребует cleartext-разрешения в debug.
         buildConfigField("String", "API_BASE_URL", "\"https://nivel-five.vercel.app/\"")
     }
 
     buildTypes {
-        debug {
-            buildConfigField("String", "API_BASE_URL", "\"https://nivel-five.vercel.app/\"")
-        }
         release {
             isMinifyEnabled = false
             proguardFiles(

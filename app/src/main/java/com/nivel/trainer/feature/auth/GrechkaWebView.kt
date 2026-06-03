@@ -52,6 +52,9 @@ fun GrechkaWebView(
     // redirect_uri — тот же callback, что у веба; токен ловим из него, на сервер не идём.
     val redirectUri = "${BuildConfig.NIVEL_URL}/api/auth/grechka-callback"
     val callbackPath = "/api/auth/grechka-callback"
+    // Хост Nivel: перехватываем токен только с нашего callback, не с чужого хоста
+    // с тем же путём (иначе сторонняя страница могла бы подсунуть токен).
+    val callbackHost = remember { Uri.parse(BuildConfig.NIVEL_URL).host }
     val initialUrl = remember(state, claimToken) {
         Uri.parse("${BuildConfig.GRECHKA_URL}/auth-nivel.html")
             .buildUpon()
@@ -73,16 +76,29 @@ fun GrechkaWebView(
                     settings.javaScriptEnabled = true
                     settings.domStorageEnabled = true
                     webViewClient = object : WebViewClient() {
+                        // Защита от двойного срабатывания: и shouldOverrideUrlLoading,
+                        // и onPageStarted могут увидеть один и тот же callback-URL.
+                        private var handled = false
+
                         override fun shouldOverrideUrlLoading(
                             view: WebView,
                             request: android.webkit.WebResourceRequest,
-                        ): Boolean = handleCallback(request.url)
+                        ): Boolean = handleCallback(view, request.url)
 
-                        private fun handleCallback(url: Uri?): Boolean {
+                        /**
+                         * @return true если URL — наш callback (перехвачен, грузить не нужно).
+                         */
+                        private fun handleCallback(view: WebView, url: Uri?): Boolean {
+                            if (handled) return false
                             if (url == null) return false
-                            if (!url.path.orEmpty().endsWith(callbackPath)) return false
+                            if (url.host != callbackHost) return false
+                            if (url.path.orEmpty() != callbackPath) return false
 
-                            // Это редирект на наш callback — перехватываем, не грузим.
+                            // Это редирект на наш callback — перехватываем, на сервер
+                            // (где он повесил бы куку и ушёл на /dashboard) не пускаем.
+                            handled = true
+                            view.stopLoading()
+
                             val token = url.getQueryParameter("token")
                             val returnedState = url.getQueryParameter("state")
                             // Гречка возвращает state в виде `csrf` или `csrf~claim`; сверяем
@@ -102,6 +118,9 @@ fun GrechkaWebView(
 
                         override fun onPageStarted(view: WebView, url: String?, favicon: Bitmap?) {
                             loading = true
+                            // Бэкстоп: серверный 302-редирект на callback в некоторых WebView
+                            // не проходит через shouldOverrideUrlLoading — ловим и здесь.
+                            handleCallback(view, url?.let(Uri::parse))
                         }
 
                         override fun onPageFinished(view: WebView, url: String?) {
@@ -113,8 +132,10 @@ fun GrechkaWebView(
                             request: android.webkit.WebResourceRequest,
                             error: android.webkit.WebResourceError,
                         ) {
-                            // Только для основного документа, не для под-ресурсов.
-                            if (request.isForMainFrame) {
+                            // Только для основного документа, не для под-ресурсов, и не
+                            // после того как callback уже перехвачен (stopLoading может
+                            // породить ошибку отмены).
+                            if (request.isForMainFrame && !handled) {
                                 loading = false
                                 onError("Не удалось загрузить страницу входа.")
                             }

@@ -16,7 +16,8 @@ import com.nivel.trainer.domain.TrainingSession
  * запись идёт отдельными write-вызовами, не через кэш.
  */
 
-private const val TAGS_SEPARATOR = "" // unit separator — не встречается в тексте тегов
+// ASCII unit separator (U+001F) — управляющий символ, не встречается в тексте тегов.
+private const val TAGS_SEPARATOR = "\u001F"
 
 // --- Students ---
 

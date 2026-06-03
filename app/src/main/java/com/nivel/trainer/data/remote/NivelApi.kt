@@ -1,20 +1,28 @@
 package com.nivel.trainer.data.remote
 
+import retrofit2.http.Body
 import retrofit2.http.GET
+import retrofit2.http.POST
 import retrofit2.http.Path
 
 /**
  * Retrofit-описание REST API бэкенда Nivel (эндпоинты `api/v1/...`, репо profeshionalx-lang/NIVEL).
  *
- * Read-endpoints учеников/сессий/карточек реализуются в задаче A3 («Фундамент»). На момент B3
- * их контракт зафиксирован дизайн-доком, но сами эндпоинты могут быть ещё не задеплоены — это не
- * блокер (см. AGENTS.md «Зависимость от бэкенда»): репозиторий тянет данные через них, при ошибке
- * остаётся кэш Room. Пути/шейпы выверяются при появлении A3.
+ * Контракт зафиксирован дизайн-доком; эндпоинты добавляются по мере готовности
+ * («Фундамент»: A2 auth-обмен, A3–A5 read/write). При ошибке сети репозиторий
+ * остаётся на кэше Room (см. AGENTS.md «Зависимость от бэкенда»).
  */
 interface NivelApi {
 
     @GET("api/v1/health")
     suspend fun health(): HealthResponse
+
+    /**
+     * Обмен Firebase ID token на bearer-сессию (A2). Используется и в WebView-флоу
+     * Гречки, и в Google Sign-In fallback: на входе всегда Firebase ID token.
+     */
+    @POST("api/v1/auth/token")
+    suspend fun exchangeToken(@Body body: TokenRequest): TokenResponse
 
     // TODO(#A3): подтвердить путь/шейп списка учеников тренера.
     @GET("api/v1/students")

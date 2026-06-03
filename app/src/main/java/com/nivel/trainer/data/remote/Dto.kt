@@ -4,7 +4,7 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
 /**
- * DTO ответов REST API бэкенда (`/api/v1/*`, репо profeshionalx-lang/NIVEL).
+ * DTO ответов REST API бэкенда (эндпоинты `/api/v1/…`, репо profeshionalx-lang/NIVEL).
  * Сериализация — kotlinx.serialization. Поля выровнены по доменной модели веба
  * (`src/lib/types/index.ts`: Profile, Session, InsightCard).
  *

@@ -1,3 +1,6 @@
+import java.io.FileInputStream
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -6,6 +9,31 @@ plugins {
     alias(libs.plugins.hilt)
     alias(libs.plugins.ksp)
 }
+
+// --- Release signing (опционально) -----------------------------------------
+// Конфиг подписи берётся из (в порядке приоритета):
+//   1) keystore.properties в корне модуля (локально, в .gitignore), либо
+//   2) переменных окружения (CI/GitHub Secrets):
+//        SIGNING_STORE_FILE, SIGNING_STORE_PASSWORD, SIGNING_KEY_ALIAS, SIGNING_KEY_PASSWORD
+// Если ничего не задано — release собирается БЕЗ подписи (unsigned APK).
+// Это сознательно: настоящий keystore — секрет человека, его нет в репозитории.
+// См. .github/workflows/android-ci.yml и README (раздел «Установка APK на телефон»).
+val keystorePropertiesFile = rootProject.file("keystore.properties")
+val keystoreProperties = Properties().apply {
+    if (keystorePropertiesFile.exists()) {
+        FileInputStream(keystorePropertiesFile).use { load(it) }
+    }
+}
+
+fun signingValue(propKey: String, envKey: String): String? =
+    (keystoreProperties.getProperty(propKey) ?: System.getenv(envKey))?.takeIf { it.isNotBlank() }
+
+val releaseStoreFilePath = signingValue("storeFile", "SIGNING_STORE_FILE")
+val releaseStorePassword = signingValue("storePassword", "SIGNING_STORE_PASSWORD")
+val releaseKeyAlias = signingValue("keyAlias", "SIGNING_KEY_ALIAS")
+val releaseKeyPassword = signingValue("keyPassword", "SIGNING_KEY_PASSWORD")
+val hasReleaseSigning = releaseStoreFilePath != null && releaseStorePassword != null &&
+    releaseKeyAlias != null && releaseKeyPassword != null
 
 android {
     namespace = "com.nivel.trainer"
@@ -37,6 +65,19 @@ android {
         buildConfigField("boolean", "GOOGLE_SIGNIN_ENABLED", "false")
     }
 
+    signingConfigs {
+        // Конфиг создаём только если заданы все четыре параметра подписи.
+        // Иначе release остаётся без signingConfig → unsigned APK (всё ещё собирается).
+        if (hasReleaseSigning) {
+            create("release") {
+                storeFile = file(releaseStoreFilePath!!)
+                storePassword = releaseStorePassword
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
@@ -44,6 +85,13 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            // Подписываем release-keystore'ом только если он предоставлен.
+            // Без секретов CI/локалка соберут unsigned release APK (для отладки).
+            signingConfig = if (hasReleaseSigning) {
+                signingConfigs.getByName("release")
+            } else {
+                null
+            }
         }
     }
 

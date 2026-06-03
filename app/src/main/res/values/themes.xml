@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+      Базовая XML-тема приложения. Реальная палитра/типографика задаётся в Compose
+      (ui/theme), эта тема нужна только окну приложения до старта Compose.
+      Используем framework-тему, чтобы не тянуть лишних зависимостей.
+    -->
+    <style name="Theme.Nivel" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:statusBarColor">@color/nivel_primary</item>
+        <item name="android:windowBackground">@color/nivel_background</item>
+    </style>
+</resources>

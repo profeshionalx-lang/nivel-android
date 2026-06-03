@@ -62,3 +62,37 @@ data class InsightCardDto(
     val position: Int = 0,
     @SerialName("created_at") val createdAt: String? = null,
 )
+
+/**
+ * Тело запроса обмена Firebase ID token на bearer-сессию.
+ * `POST /api/v1/auth/token` (эндпоинт A2 в репо NIVEL).
+ */
+@Serializable
+data class TokenRequest(
+    val idToken: String,
+    val claimToken: String? = null,
+)
+
+/**
+ * Ответ `POST /api/v1/auth/token`: `{ ok, token, user, expiresIn }`.
+ * `token` — HMAC-JWT (тот же, что веб-кука `__session`), кладётся в DataStore
+ * и шлётся как `Authorization: Bearer`.
+ */
+@Serializable
+data class TokenResponse(
+    val ok: Boolean = true,
+    val token: String,
+    val user: SessionUserDto,
+    val expiresIn: Long,
+)
+
+/** Профиль пользователя из сессии (SessionUser в `src/lib/auth/session.ts`). */
+@Serializable
+data class SessionUserDto(
+    val id: String,
+    val email: String,
+    @SerialName("firebase_uid") val firebaseUid: String,
+    @SerialName("full_name") val fullName: String,
+    @SerialName("avatar_url") val avatarUrl: String? = null,
+    val role: String,
+)

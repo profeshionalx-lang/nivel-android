@@ -6,7 +6,8 @@ import androidx.room.RoomDatabase
 /**
  * Room-БД приложения — кэш чтения (не источник правды). Базовые сущности B3:
  * ученики, сессии, инсайт-карточки. Новые сущности и миграции добавляются в
- * следующих задачах; пока version = 1.
+ * следующих задачах. version = 2: в StudentEntity добавлены счётчики
+ * целей/сессий (B4). Миграция деструктивная — кэш безопасно пересоздаётся.
  */
 @Database(
     entities = [
@@ -14,7 +15,7 @@ import androidx.room.RoomDatabase
         SessionEntity::class,
         InsightCardEntity::class,
     ],
-    version = 1,
+    version = 2,
     exportSchema = true,
 )
 abstract class NivelDatabase : RoomDatabase() {

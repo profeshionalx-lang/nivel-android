@@ -24,9 +24,13 @@ interface NivelApi {
     @POST("api/v1/auth/token")
     suspend fun exchangeToken(@Body body: TokenRequest): TokenResponse
 
-    // TODO(#A3): подтвердить путь/шейп списка учеников тренера.
+    /**
+     * Список учеников тренера (A3). Реальный контракт — обёртка `{ students: [...] }`
+     * со счётчиками `active_goals`/`total_sessions` (сверено по
+     * `src/app/api/v1/students/route.ts`). Trainer-only, авторизация по bearer.
+     */
     @GET("api/v1/students")
-    suspend fun getStudents(): List<StudentDto>
+    suspend fun getStudents(): StudentsResponse
 
     // TODO(#A3): подтвердить путь/шейп сессий ученика.
     @GET("api/v1/students/{studentId}/sessions")
@@ -35,4 +39,30 @@ interface NivelApi {
     // TODO(#A3): подтвердить путь/шейп инсайт-карточек сессии.
     @GET("api/v1/sessions/{sessionId}/cards")
     suspend fun getSessionCards(@Path("sessionId") sessionId: String): List<InsightCardDto>
+
+    // ---------------------------------------------------------------------------
+    // B4 (#7) — создание теневого ученика и приглашение (write A5).
+    // Добавлено в конец интерфейса, чтобы минимизировать diff в общем файле.
+    // ---------------------------------------------------------------------------
+
+    /**
+     * Создать теневого ученика (`POST /api/v1/students`, 201). Тело `{ full_name }`.
+     * Возвращает claim-ссылку приглашения для шаринга. Trainer-only.
+     */
+    @POST("api/v1/students")
+    suspend fun createStudent(@Body body: CreateStudentRequest): ShadowStudentResponse
+
+    /**
+     * Перевыпустить приглашение для незаклеймленного теневого ученика
+     * (`POST /api/v1/students/{id}/invite/regenerate`). Возвращает новую claim-ссылку.
+     */
+    @POST("api/v1/students/{studentId}/invite/regenerate")
+    suspend fun regenerateInvite(@Path("studentId") studentId: String): ShadowStudentResponse
+
+    /**
+     * Отозвать приглашение ученика (`POST /api/v1/students/{id}/invite/revoke`).
+     * Старая ссылка перестаёт работать. Ответ `{ ok }`.
+     */
+    @POST("api/v1/students/{studentId}/invite/revoke")
+    suspend fun revokeInvite(@Path("studentId") studentId: String): OkResponse
 }

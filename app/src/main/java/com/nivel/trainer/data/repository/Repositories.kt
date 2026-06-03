@@ -3,10 +3,12 @@ package com.nivel.trainer.data.repository
 import com.nivel.trainer.data.local.InsightCardDao
 import com.nivel.trainer.data.local.SessionDao
 import com.nivel.trainer.data.local.StudentDao
+import com.nivel.trainer.data.remote.CreateStudentRequest
 import com.nivel.trainer.data.remote.NivelApi
 import com.nivel.trainer.data.toDomain
 import com.nivel.trainer.data.toEntity
 import com.nivel.trainer.domain.InsightCard
+import com.nivel.trainer.domain.ShadowStudent
 import com.nivel.trainer.domain.Student
 import com.nivel.trainer.domain.TrainingSession
 import kotlinx.coroutines.flow.Flow
@@ -33,6 +35,12 @@ interface StudentRepository {
 
     /** Обновить кэш с сервера. При ошибке кэш сохраняется. */
     suspend fun refreshStudents(): Result<Unit>
+
+    /**
+     * Создать теневого ученика и получить claim-ссылку приглашения (B4).
+     * После успеха кэш списка обновляется, чтобы новый ученик появился сразу.
+     */
+    suspend fun createShadowStudent(fullName: String): Result<ShadowStudent>
 }
 
 interface SessionRepository {
@@ -55,8 +63,19 @@ class DefaultStudentRepository @Inject constructor(
         dao.observeAll().map { list -> list.map { it.toDomain() } }
 
     override suspend fun refreshStudents(): Result<Unit> = runCatching {
-        val remote = api.getStudents()
+        // Контракт A3 — обёртка `{ students: [...] }`.
+        val remote = api.getStudents().students
         dao.replaceAll(remote.map { it.toEntity() })
+    }
+
+    override suspend fun createShadowStudent(fullName: String): Result<ShadowStudent> = runCatching {
+        val response = api.createStudent(CreateStudentRequest(fullName = fullName.trim()))
+        // Подтянуть свежий список, чтобы новый ученик появился в кэше/UI сразу.
+        // Сбой refresh не должен отменять успешное создание — claim-ссылка уже выдана.
+        runCatching {
+            dao.replaceAll(api.getStudents().students.map { it.toEntity() })
+        }
+        response.toDomain()
     }
 }
 

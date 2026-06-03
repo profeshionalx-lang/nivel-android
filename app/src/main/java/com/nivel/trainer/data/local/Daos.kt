@@ -16,7 +16,9 @@ import kotlinx.coroutines.flow.Flow
 @Dao
 interface StudentDao {
 
-    @Query("SELECT * FROM students ORDER BY fullName COLLATE NOCASE ASC")
+    // Порядок один-в-один с вебом (`trainer/students/page.tsx`): новые сверху.
+    // createdAt — ISO-строка, лексикографическая сортировка совпадает с временной.
+    @Query("SELECT * FROM students ORDER BY createdAt DESC")
     fun observeAll(): Flow<List<StudentEntity>>
 
     @Upsert

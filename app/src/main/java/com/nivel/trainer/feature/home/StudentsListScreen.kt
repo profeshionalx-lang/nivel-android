@@ -28,7 +28,6 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
@@ -36,13 +35,6 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.KeyboardArrowRight
-import androidx.compose.material.icons.filled.Person
-import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Share
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -168,12 +160,11 @@ private fun StudentsListContent(
                     ),
                     contentPadding = PaddingValues(horizontal = 14.dp),
                 ) {
-                    Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.size(4.dp))
-                    Text("Ученик", fontWeight = FontWeight.Black, fontSize = 13.sp)
+                    // Веб: «+ Create student». Глиф «+» текстом — без зависимости от icon-пакета.
+                    Text("+ Ученик", fontWeight = FontWeight.Black, fontSize = 13.sp)
                 }
                 IconButton(onClick = onClose, modifier = Modifier.size(TouchTarget)) {
-                    Icon(Icons.Filled.Close, contentDescription = "Закрыть", tint = OnSurfaceVariant)
+                    Text("✕", color = OnSurfaceVariant, fontSize = 18.sp, fontWeight = FontWeight.Bold)
                 }
             }
         }
@@ -250,11 +241,8 @@ private fun StudentRow(student: Student, onClick: () -> Unit) {
                 CountLabel(value = student.totalSessions, suffix = "сессий", valueColor = Secondary)
             }
         }
-        Icon(
-            imageVector = Icons.Filled.KeyboardArrowRight,
-            contentDescription = null,
-            tint = OnSurfaceVariant.copy(alpha = 0.4f),
-        )
+        // Шеврон вправо (веб: chevron_right) — глифом, без icon-пакета.
+        Text("›", color = OnSurfaceVariant.copy(alpha = 0.4f), fontSize = 22.sp)
     }
 }
 
@@ -274,12 +262,8 @@ private fun CountLabel(value: Int, suffix: String, valueColor: Color) {
 @Composable
 private fun EmptyState() {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Icon(
-            imageVector = Icons.Filled.Person,
-            contentDescription = null,
-            tint = OnSurfaceVariant,
-            modifier = Modifier.size(48.dp),
-        )
+        // Веб empty-state: иконка groups + текст. Глифом, без icon-пакета.
+        Text("👥", fontSize = 40.sp)
         Spacer(Modifier.size(16.dp))
         Text(text = "Учеников пока нет", color = OnSurfaceVariant, fontSize = 14.sp)
     }
@@ -299,8 +283,6 @@ private fun ErrorState(message: String, onRetry: () -> Unit) {
         )
         Spacer(Modifier.size(16.dp))
         TextButton(onClick = onRetry) {
-            Icon(Icons.Filled.Refresh, contentDescription = null, tint = Primary, modifier = Modifier.size(18.dp))
-            Spacer(Modifier.size(6.dp))
             Text("Повторить", color = Primary, fontWeight = FontWeight.Bold)
         }
     }
@@ -345,7 +327,6 @@ private fun CreateStudentSheet(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun CreateForm(
     state: CreateSheetState.Form,
@@ -456,8 +437,6 @@ private fun CreatedShare(shadow: ShadowStudent, onDone: () -> Unit) {
         shape = RoundedCornerShape(12.dp),
         colors = ButtonDefaults.buttonColors(containerColor = Primary, contentColor = OnPrimary),
     ) {
-        Icon(Icons.Filled.Share, contentDescription = null, modifier = Modifier.size(18.dp))
-        Spacer(Modifier.size(8.dp))
         Text("Поделиться ссылкой", fontWeight = FontWeight.Bold)
     }
 

@@ -22,16 +22,20 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -423,11 +427,17 @@ private fun ActionErrorBanner(message: String, onDismiss: () -> Unit) {
     }
 }
 
+/** Действие с приглашением, требующее подтверждения (как `confirm()` в вебе). */
+private enum class InviteConfirm { REGENERATE, REVOKE }
+
 /**
  * Секция приглашения (порт `InviteBlock`/`InviteBlockClient`): бейдж статуса +
  * действия по статусу. none → создать ссылку; pending → ссылка + копировать +
- * перевыпустить/отозвать; claimed → дата принятия; revoked → только бейдж.
+ * перевыпустить/отозвать; claimed → дата принятия; revoked → только бейдж;
+ * unknown (GET статуса ещё не готов) → перевыпустить. Перевыпуск/отзыв
+ * подтверждаются bottom-sheet'ом (web делает это через `confirm()`).
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun InviteSection(
     invite: StudentInvite,
@@ -435,6 +445,8 @@ private fun InviteSection(
     onRegenerate: () -> Unit,
     onRevoke: () -> Unit,
 ) {
+    var confirm by remember { mutableStateOf<InviteConfirm?>(null) }
+
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -466,33 +478,131 @@ private fun InviteSection(
             InviteStatus.PENDING -> {
                 invite.claimUrl?.let { url -> InviteLinkRow(url) }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlineActionButton(text = "Перевыпустить", enabled = !busy, color = OnSurface, onClick = onRegenerate, modifier = Modifier.weight(1f))
-                    OutlineActionButton(text = "Отозвать", enabled = !busy, color = ErrorColor, onClick = onRevoke, modifier = Modifier.weight(1f))
+                    OutlineActionButton(text = "Перевыпустить", enabled = !busy, color = OnSurface, onClick = { confirm = InviteConfirm.REGENERATE }, modifier = Modifier.weight(1f))
+                    OutlineActionButton(text = "Отозвать", enabled = !busy, color = ErrorColor, onClick = { confirm = InviteConfirm.REVOKE }, modifier = Modifier.weight(1f))
                 }
             }
 
-            // none / unknown — даём создать (перевыпустить) ссылку.
-            InviteStatus.NONE, InviteStatus.UNKNOWN -> {
-                Button(
-                    onClick = onRegenerate,
+            // none — приглашение ещё не выдавалось: создать ссылку.
+            InviteStatus.NONE -> InvitePrimaryButton(
+                text = if (busy) "Создаём…" else "Создать ссылку-приглашение",
+                enabled = !busy,
+                onClick = { confirm = InviteConfirm.REGENERATE },
+            )
+
+            // unknown — реальный статус недоступен (GET ещё не готов): только перевыпуск,
+            // без слова «создать», чтобы не вводить в заблуждение.
+            InviteStatus.UNKNOWN -> {
+                Text(
+                    text = "Статус приглашения временно недоступен.",
+                    color = OnSurfaceVariant,
+                    fontSize = 12.sp,
+                )
+                InvitePrimaryButton(
+                    text = if (busy) "Обновляем…" else "Перевыпустить ссылку",
                     enabled = !busy,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(min = TouchTarget),
-                    shape = RoundedCornerShape(12.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = Primary,
-                        contentColor = OnPrimary,
-                        disabledContainerColor = Primary.copy(alpha = 0.4f),
-                        disabledContentColor = OnPrimary,
-                    ),
-                ) {
-                    Text(if (busy) "Создаём…" else "Создать ссылку-приглашение", fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                }
+                    onClick = { confirm = InviteConfirm.REGENERATE },
+                )
             }
 
             // revoked — как в вебе: только бейдж, без действий.
             InviteStatus.REVOKED -> Unit
+        }
+    }
+
+    confirm?.let { action ->
+        val (message, confirmLabel, confirmColor) = when (action) {
+            InviteConfirm.REGENERATE ->
+                Triple("Перевыпустить приглашение? Старая ссылка перестанет работать.", "Перевыпустить", Primary)
+            InviteConfirm.REVOKE ->
+                Triple("Отозвать приглашение?", "Отозвать", ErrorColor)
+        }
+        InviteConfirmSheet(
+            message = message,
+            confirmLabel = confirmLabel,
+            confirmColor = confirmColor,
+            onConfirm = {
+                confirm = null
+                when (action) {
+                    InviteConfirm.REGENERATE -> onRegenerate()
+                    InviteConfirm.REVOKE -> onRevoke()
+                }
+            },
+            onDismiss = { confirm = null },
+        )
+    }
+}
+
+/** Лаймовая кнопка действия с приглашением (создать/перевыпустить). */
+@Composable
+private fun InvitePrimaryButton(text: String, enabled: Boolean, onClick: () -> Unit) {
+    Button(
+        onClick = onClick,
+        enabled = enabled,
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = TouchTarget),
+        shape = RoundedCornerShape(12.dp),
+        colors = ButtonDefaults.buttonColors(
+            containerColor = Primary,
+            contentColor = OnPrimary,
+            disabledContainerColor = Primary.copy(alpha = 0.4f),
+            disabledContentColor = OnPrimary,
+        ),
+    ) {
+        Text(text, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+    }
+}
+
+/** Bottom-sheet подтверждения деструктивного действия (mobile-first вместо confirm()). */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun InviteConfirmSheet(
+    message: String,
+    confirmLabel: String,
+    confirmColor: Color,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = SurfaceCard,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .widthIn(max = 430.dp)
+                .padding(horizontal = 24.dp)
+                .padding(bottom = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            Text(text = message, color = OnSurface, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(
+                    onClick = onConfirm,
+                    modifier = Modifier
+                        .weight(1f)
+                        .heightIn(min = TouchTarget),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = confirmColor,
+                        contentColor = if (confirmColor == Primary) OnPrimary else OnSurface,
+                    ),
+                ) {
+                    Text(confirmLabel, fontWeight = FontWeight.Bold)
+                }
+                TextButton(
+                    onClick = onDismiss,
+                    modifier = Modifier
+                        .weight(1f)
+                        .heightIn(min = TouchTarget),
+                    shape = RoundedCornerShape(12.dp),
+                ) {
+                    Text("Отмена", color = OnSurface, fontWeight = FontWeight.Bold)
+                }
+            }
         }
     }
 }
@@ -819,8 +929,12 @@ private val TIME_FMT: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm", R
 private val DATE_FMT: DateTimeFormatter = DateTimeFormatter.ofPattern("d MMMM", RuLocale)
 private val CLAIMED_FMT: DateTimeFormatter = DateTimeFormatter.ofPattern("d MMMM yyyy, HH:mm", RuLocale)
 
-/** Дата принятия приглашения (E3): «5 июня 2026, 14:30» в UTC; невалид → исходная строка. */
-private fun formatClaimedAt(raw: String): String = parseUtc(raw)?.format(CLAIMED_FMT) ?: raw
+/**
+ * Дата принятия приглашения (E3): «5 июня 2026, 14:30» в локальной зоне устройства
+ * (как `toLocaleString()` в вебе). Невалидное значение → исходная строка.
+ */
+private fun formatClaimedAt(raw: String): String =
+    parseUtc(raw)?.atZoneSameInstant(java.time.ZoneId.systemDefault())?.format(CLAIMED_FMT) ?: raw
 
 /**
  * Парсит ISO-строку времени в UTC. Сервер отдаёт timestamp/дату в разных формах

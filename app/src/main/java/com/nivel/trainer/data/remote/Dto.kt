@@ -142,3 +142,83 @@ data class SessionUserDto(
     @SerialName("avatar_url") val avatarUrl: String? = null,
     val role: String,
 )
+
+// -----------------------------------------------------------------------------
+// B5 (#8) — профиль ученика (просмотр): цели + сессии + мастер-план.
+// Контракт сверен по реальным core-функциям NIVEL
+// (`src/lib/core/trainerReads.ts`: getStudentDetailCore, getMasterPlanCore).
+// Добавлено в конец файла, чтобы минимизировать diff в общем файле.
+// -----------------------------------------------------------------------------
+
+/**
+ * Ответ `GET /api/v1/students/{id}` — профиль ученика с целями и сессиями
+ * (`StudentDetail` из `getStudentDetailCore`). Не обёрнут — объект отдаётся как есть.
+ */
+@Serializable
+data class StudentDetailResponse(
+    val id: String,
+    val email: String? = null,
+    @SerialName("full_name") val fullName: String? = null,
+    @SerialName("avatar_url") val avatarUrl: String? = null,
+    val goals: List<GoalDto> = emptyList(),
+    val sessions: List<StudentSessionDto> = emptyList(),
+)
+
+/** Цель ученика в профиле. Заголовок цели = `custom_problem` (как в вебе). */
+@Serializable
+data class GoalDto(
+    val id: String,
+    @SerialName("custom_problem") val customProblem: String? = null,
+    val status: String,
+    @SerialName("created_at") val createdAt: String? = null,
+)
+
+/**
+ * Сессия в профиле ученика. Отдельный DTO от [SessionDto]: контракт
+ * `getStudentDetailCore` отдаёт `session_number` как nullable и без
+ * trainer_notes/insight — переиспользовать строгий [SessionDto] нельзя.
+ */
+@Serializable
+data class StudentSessionDto(
+    val id: String,
+    @SerialName("goal_id") val goalId: String? = null,
+    @SerialName("session_number") val sessionNumber: Int? = null,
+    val status: String,
+    @SerialName("scheduled_at") val scheduledAt: String? = null,
+    @SerialName("completed_at") val completedAt: String? = null,
+    @SerialName("created_at") val createdAt: String? = null,
+)
+
+/**
+ * Ответ `GET /api/v1/students/{id}/master-plan` — обёртка `{ plan }`,
+ * `plan: null` когда у ученика ещё нет плана (`getMasterPlanCore`).
+ */
+@Serializable
+data class MasterPlanResponse(
+    val plan: MasterPlanDto? = null,
+)
+
+/** Мастер-план: секции по порядку, у каждой — пункты. */
+@Serializable
+data class MasterPlanDto(
+    val id: String,
+    val sections: List<MasterPlanSectionDto> = emptyList(),
+)
+
+@Serializable
+data class MasterPlanSectionDto(
+    val id: String,
+    val title: String,
+    val category: String? = null,
+    @SerialName("sort_order") val sortOrder: Int = 0,
+    val items: List<MasterPlanItemDto> = emptyList(),
+)
+
+@Serializable
+data class MasterPlanItemDto(
+    val id: String,
+    val title: String,
+    val description: String? = null,
+    @SerialName("image_url") val imageUrl: String? = null,
+    @SerialName("sort_order") val sortOrder: Int = 0,
+)

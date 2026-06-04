@@ -62,3 +62,59 @@ data class InsightCard(
     val position: Int,
     val createdAt: String?,
 )
+
+// --- B5 (#8): профиль ученика (просмотр) ---
+
+/** Цель ученика в профиле. Заголовок = [customProblem] (как в вебе). */
+data class Goal(
+    val id: String,
+    val customProblem: String?,
+    val status: String,
+    val createdAt: String?,
+)
+
+/**
+ * Сессия в карточке профиля ученика. Легче [TrainingSession]: контракт
+ * `/students/{id}` отдаёт только id/номер/статус/даты, `sessionNumber` nullable.
+ */
+data class StudentSession(
+    val id: String,
+    val goalId: String?,
+    val sessionNumber: Int?,
+    val status: String,
+    val scheduledAt: String?,
+    val completedAt: String?,
+    val createdAt: String?,
+)
+
+/** Профиль ученика: базовая инфо + его цели и сессии. */
+data class StudentProfile(
+    val id: String,
+    val fullName: String?,
+    val email: String?,
+    val avatarUrl: String?,
+    val goals: List<Goal>,
+    val sessions: List<StudentSession>,
+    /** Мастер-план ученика; null — плана ещё нет. */
+    val masterPlan: MasterPlan?,
+)
+
+/** Мастер-план ученика: упорядоченные секции с пунктами. */
+data class MasterPlan(
+    val id: String,
+    val sections: List<MasterPlanSection>,
+)
+
+data class MasterPlanSection(
+    val id: String,
+    val title: String,
+    val category: String?,
+    val items: List<MasterPlanItem>,
+)
+
+data class MasterPlanItem(
+    val id: String,
+    val title: String,
+    val description: String?,
+    val imageUrl: String?,
+)

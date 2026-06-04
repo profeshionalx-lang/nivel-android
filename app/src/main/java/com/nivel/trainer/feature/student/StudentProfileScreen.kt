@@ -24,17 +24,26 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -45,12 +54,15 @@ import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.nivel.trainer.domain.Goal
+import com.nivel.trainer.domain.InviteStatus
 import com.nivel.trainer.domain.MasterPlan
 import com.nivel.trainer.domain.MasterPlanItem
 import com.nivel.trainer.domain.MasterPlanSection
+import com.nivel.trainer.domain.StudentInvite
 import com.nivel.trainer.domain.StudentProfile
 import com.nivel.trainer.domain.StudentSession
 import com.nivel.trainer.ui.theme.NivelTheme
+import kotlinx.coroutines.delay
 import java.time.OffsetDateTime
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
@@ -65,6 +77,8 @@ private val SurfaceCard = Color(0xFF1E1E1E)          // --surface-card
 private val Primary = Color(0xFFCAFD00)              // --primary (лайм)
 private val OnPrimary = Color(0xFF000000)            // text на primary
 private val Secondary = Color(0xFF7CC6FE)            // --secondary
+private val SurfaceElevated = Color(0xFF262626)      // --surface-elevated (поле ввода / ссылка)
+private val BorderDim = Color(0xFF2E2E2E)            // --border-dim
 private val OnSurface = Color(0xFFF5F5F5)            // --on-surface
 private val OnSurfaceVariant = Color(0xFFADAAAA)     // --on-surface-variant
 private val ErrorColor = Color(0xFFFF7351)           // --error
@@ -97,9 +111,20 @@ fun StudentProfileScreen(
         loading = state.loading,
         error = state.error,
         profile = state.profile,
+        editing = state.editing,
+        inviteBusy = state.inviteBusy,
+        actionError = state.actionError,
         onBack = onBack,
         onOpenSession = onOpenSession,
         onRetry = viewModel::refresh,
+        onStartEdit = viewModel::startEdit,
+        onEditName = viewModel::onEditNameChange,
+        onEditAvatar = viewModel::onEditAvatarChange,
+        onSaveEdit = viewModel::saveEdit,
+        onCancelEdit = viewModel::cancelEdit,
+        onRegenerate = viewModel::regenerateInvite,
+        onRevoke = viewModel::revokeInvite,
+        onDismissActionError = viewModel::dismissActionError,
         modifier = modifier,
     )
 }
@@ -113,6 +138,17 @@ private fun StudentProfileContent(
     onOpenSession: (String) -> Unit,
     onRetry: () -> Unit,
     modifier: Modifier = Modifier,
+    editing: ProfileEditState? = null,
+    inviteBusy: Boolean = false,
+    actionError: String? = null,
+    onStartEdit: () -> Unit = {},
+    onEditName: (String) -> Unit = {},
+    onEditAvatar: (String) -> Unit = {},
+    onSaveEdit: () -> Unit = {},
+    onCancelEdit: () -> Unit = {},
+    onRegenerate: () -> Unit = {},
+    onRevoke: () -> Unit = {},
+    onDismissActionError: () -> Unit = {},
 ) {
     Column(
         modifier = modifier
@@ -126,7 +162,21 @@ private fun StudentProfileContent(
 
             error != null && profile == null -> CenterBox { ErrorState(error, onRetry) }
 
-            profile != null -> ProfileBody(profile = profile, onOpenSession = onOpenSession)
+            profile != null -> ProfileBody(
+                profile = profile,
+                editing = editing,
+                inviteBusy = inviteBusy,
+                actionError = actionError,
+                onOpenSession = onOpenSession,
+                onStartEdit = onStartEdit,
+                onEditName = onEditName,
+                onEditAvatar = onEditAvatar,
+                onSaveEdit = onSaveEdit,
+                onCancelEdit = onCancelEdit,
+                onRegenerate = onRegenerate,
+                onRevoke = onRevoke,
+                onDismissActionError = onDismissActionError,
+            )
 
             else -> CenterBox { EmptyState() }
         }
@@ -159,13 +209,44 @@ private fun Header(onBack: () -> Unit) {
 }
 
 @Composable
-private fun ProfileBody(profile: StudentProfile, onOpenSession: (String) -> Unit) {
+private fun ProfileBody(
+    profile: StudentProfile,
+    editing: ProfileEditState?,
+    inviteBusy: Boolean,
+    actionError: String?,
+    onOpenSession: (String) -> Unit,
+    onStartEdit: () -> Unit,
+    onEditName: (String) -> Unit,
+    onEditAvatar: (String) -> Unit,
+    onSaveEdit: () -> Unit,
+    onCancelEdit: () -> Unit,
+    onRegenerate: () -> Unit,
+    onRevoke: () -> Unit,
+    onDismissActionError: () -> Unit,
+) {
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 32.dp),
         verticalArrangement = Arrangement.spacedBy(24.dp),
     ) {
-        item { ProfileHeaderBlock(profile) }
+        actionError?.let { err ->
+            item { ActionErrorBanner(message = err, onDismiss = onDismissActionError) }
+        }
+        // Приглашение ученика — выше профиля (как InviteBlock над DashboardView в вебе).
+        profile.invite?.let { invite ->
+            item { InviteSection(invite = invite, busy = inviteBusy, onRegenerate = onRegenerate, onRevoke = onRevoke) }
+        }
+        item {
+            ProfileHeaderBlock(
+                profile = profile,
+                editing = editing,
+                onStartEdit = onStartEdit,
+                onEditName = onEditName,
+                onEditAvatar = onEditAvatar,
+                onSave = onSaveEdit,
+                onCancel = onCancelEdit,
+            )
+        }
         profile.masterPlan?.let { plan ->
             if (plan.sections.isNotEmpty()) item { MasterPlanBlock(plan) }
         }
@@ -174,10 +255,30 @@ private fun ProfileBody(profile: StudentProfile, onOpenSession: (String) -> Unit
     }
 }
 
-/** Шапка профиля: аватар-инициалы + имя + email (read-only, как в вебе). */
+/**
+ * Шапка профиля (E3): просмотр (тап → правка) или инлайн-форма правки имени/аватара,
+ * как `InlineProfileHeader` в вебе.
+ */
 @Composable
-private fun ProfileHeaderBlock(profile: StudentProfile) {
+private fun ProfileHeaderBlock(
+    profile: StudentProfile,
+    editing: ProfileEditState?,
+    onStartEdit: () -> Unit,
+    onEditName: (String) -> Unit,
+    onEditAvatar: (String) -> Unit,
+    onSave: () -> Unit,
+    onCancel: () -> Unit,
+) {
+    if (editing != null) {
+        ProfileEditForm(editing, onEditName, onEditAvatar, onSave, onCancel)
+        return
+    }
+    // Просмотр: tap по строке → правка (веб: «Trainer admin · tap to edit»).
     Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onStartEdit)
+            .padding(vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(16.dp),
     ) {
@@ -196,6 +297,13 @@ private fun ProfileHeaderBlock(profile: StudentProfile) {
             )
         }
         Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = "Профиль · нажмите, чтобы изменить",
+                color = OnSurfaceVariant,
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Black,
+                letterSpacing = 2.sp,
+            )
             Text(
                 text = profile.fullName?.takeIf { it.isNotBlank() }
                     ?: profile.email?.takeIf { it.isNotBlank() }
@@ -216,6 +324,254 @@ private fun ProfileHeaderBlock(profile: StudentProfile) {
                 )
             }
         }
+        // Глиф «карандаш» — намёк на правку (веб: material-icon edit).
+        Text("✎", color = OnSurfaceVariant.copy(alpha = 0.4f), fontSize = 18.sp)
+    }
+}
+
+/** Инлайн-форма правки: имя + URL аватара + Сохранить/Отмена (как в вебе). */
+@Composable
+private fun ProfileEditForm(
+    editing: ProfileEditState,
+    onEditName: (String) -> Unit,
+    onEditAvatar: (String) -> Unit,
+    onSave: () -> Unit,
+    onCancel: () -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(SurfaceCard, RoundedCornerShape(16.dp))
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        ProfileTextField(value = editing.fullName, onChange = onEditName, placeholder = "Имя и фамилия")
+        ProfileTextField(value = editing.avatarUrl, onChange = onEditAvatar, placeholder = "URL аватара (необязательно)")
+
+        editing.error?.let { err ->
+            Text(text = err, color = ErrorColor, fontSize = 12.sp)
+        }
+
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(
+                onClick = onSave,
+                enabled = !editing.submitting,
+                modifier = Modifier
+                    .weight(1f)
+                    .heightIn(min = TouchTarget),
+                shape = RoundedCornerShape(12.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = Primary,
+                    contentColor = OnPrimary,
+                    disabledContainerColor = Primary.copy(alpha = 0.4f),
+                    disabledContentColor = OnPrimary,
+                ),
+            ) {
+                Text(if (editing.submitting) "Сохраняем…" else "Сохранить", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+            }
+            TextButton(
+                onClick = onCancel,
+                enabled = !editing.submitting,
+                modifier = Modifier
+                    .weight(1f)
+                    .heightIn(min = TouchTarget),
+                shape = RoundedCornerShape(12.dp),
+            ) {
+                Text("Отмена", color = OnSurface, fontWeight = FontWeight.Bold)
+            }
+        }
+    }
+}
+
+@Composable
+private fun ProfileTextField(value: String, onChange: (String) -> Unit, placeholder: String) {
+    OutlinedTextField(
+        value = value,
+        onValueChange = onChange,
+        singleLine = true,
+        placeholder = { Text(placeholder, color = OnSurfaceVariant) },
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = TouchTarget),
+        shape = RoundedCornerShape(12.dp),
+        colors = OutlinedTextFieldDefaults.colors(
+            focusedTextColor = OnSurface,
+            unfocusedTextColor = OnSurface,
+            focusedContainerColor = SurfaceElevated,
+            unfocusedContainerColor = SurfaceElevated,
+            focusedBorderColor = Primary,
+            unfocusedBorderColor = BorderDim,
+            cursorColor = Primary,
+        ),
+    )
+}
+
+/** Баннер ошибки действия (перевыпуск/отзыв приглашения) с кнопкой закрытия. */
+@Composable
+private fun ActionErrorBanner(message: String, onDismiss: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(ErrorColor.copy(alpha = 0.1f), RoundedCornerShape(12.dp))
+            .padding(start = 12.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(text = message, color = ErrorColor, fontSize = 12.sp, modifier = Modifier.weight(1f))
+        TextButton(onClick = onDismiss, modifier = Modifier.heightIn(min = TouchTarget)) {
+            Text("✕", color = ErrorColor, fontWeight = FontWeight.Bold)
+        }
+    }
+}
+
+/**
+ * Секция приглашения (порт `InviteBlock`/`InviteBlockClient`): бейдж статуса +
+ * действия по статусу. none → создать ссылку; pending → ссылка + копировать +
+ * перевыпустить/отозвать; claimed → дата принятия; revoked → только бейдж.
+ */
+@Composable
+private fun InviteSection(
+    invite: StudentInvite,
+    busy: Boolean,
+    onRegenerate: () -> Unit,
+    onRevoke: () -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(SurfaceCard, RoundedCornerShape(16.dp))
+            .border(1.dp, BorderDim, RoundedCornerShape(16.dp))
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Text(
+                text = "Приглашение ученика",
+                color = OnSurfaceVariant,
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Black,
+                letterSpacing = 2.sp,
+            )
+            InviteBadge(invite.status)
+        }
+
+        when (invite.status) {
+            InviteStatus.CLAIMED -> invite.claimedAt?.let { at ->
+                Text(text = "Принято ${formatClaimedAt(at)}", color = OnSurfaceVariant, fontSize = 12.sp)
+            }
+
+            InviteStatus.PENDING -> {
+                invite.claimUrl?.let { url -> InviteLinkRow(url) }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlineActionButton(text = "Перевыпустить", enabled = !busy, color = OnSurface, onClick = onRegenerate, modifier = Modifier.weight(1f))
+                    OutlineActionButton(text = "Отозвать", enabled = !busy, color = ErrorColor, onClick = onRevoke, modifier = Modifier.weight(1f))
+                }
+            }
+
+            // none / unknown — даём создать (перевыпустить) ссылку.
+            InviteStatus.NONE, InviteStatus.UNKNOWN -> {
+                Button(
+                    onClick = onRegenerate,
+                    enabled = !busy,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = TouchTarget),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Primary,
+                        contentColor = OnPrimary,
+                        disabledContainerColor = Primary.copy(alpha = 0.4f),
+                        disabledContentColor = OnPrimary,
+                    ),
+                ) {
+                    Text(if (busy) "Создаём…" else "Создать ссылку-приглашение", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                }
+            }
+
+            // revoked — как в вебе: только бейдж, без действий.
+            InviteStatus.REVOKED -> Unit
+        }
+    }
+}
+
+@Composable
+private fun InviteBadge(status: InviteStatus) {
+    val (text, color) = when (status) {
+        InviteStatus.NONE -> "Не отправлено" to OnSurfaceVariant
+        InviteStatus.PENDING -> "Ожидает" to Secondary
+        InviteStatus.CLAIMED -> "Принято" to Primary
+        InviteStatus.REVOKED -> "Отозвано" to ErrorColor
+        InviteStatus.UNKNOWN -> "Статус неизвестен" to OnSurfaceVariant
+    }
+    Text(
+        text = text,
+        color = color,
+        fontSize = 10.sp,
+        fontWeight = FontWeight.Black,
+        letterSpacing = 1.sp,
+        modifier = Modifier
+            .background(color.copy(alpha = 0.15f), RoundedCornerShape(999.dp))
+            .padding(horizontal = 8.dp, vertical = 3.dp),
+    )
+}
+
+/** Строка claim-ссылки с кнопкой «Копировать» (как в вебе bg-surface-elevated + Copy). */
+@Composable
+private fun InviteLinkRow(url: String) {
+    val clipboard = LocalClipboardManager.current
+    var copied by remember { mutableStateOf(false) }
+    LaunchedEffect(copied) {
+        if (copied) {
+            delay(2000)
+            copied = false
+        }
+    }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(SurfaceElevated, RoundedCornerShape(12.dp))
+            .padding(start = 12.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = url,
+            color = OnSurface,
+            fontSize = 12.sp,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
+        )
+        TextButton(
+            onClick = {
+                clipboard.setText(AnnotatedString(url))
+                copied = true
+            },
+            modifier = Modifier.heightIn(min = TouchTarget),
+        ) {
+            Text(if (copied) "✓" else "Копировать", color = Primary, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+        }
+    }
+}
+
+/** Bordered-кнопка действия (перевыпустить/отозвать), цвет текста по семантике. */
+@Composable
+private fun OutlineActionButton(
+    text: String,
+    enabled: Boolean,
+    color: Color,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    TextButton(
+        onClick = onClick,
+        enabled = enabled,
+        modifier = modifier.heightIn(min = TouchTarget),
+        shape = RoundedCornerShape(12.dp),
+    ) {
+        Text(text, color = if (enabled) color else color.copy(alpha = 0.4f), fontWeight = FontWeight.Bold, fontSize = 13.sp)
     }
 }
 
@@ -461,6 +817,10 @@ private fun sessionDateLine(session: StudentSession): String {
 
 private val TIME_FMT: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm", RuLocale)
 private val DATE_FMT: DateTimeFormatter = DateTimeFormatter.ofPattern("d MMMM", RuLocale)
+private val CLAIMED_FMT: DateTimeFormatter = DateTimeFormatter.ofPattern("d MMMM yyyy, HH:mm", RuLocale)
+
+/** Дата принятия приглашения (E3): «5 июня 2026, 14:30» в UTC; невалид → исходная строка. */
+private fun formatClaimedAt(raw: String): String = parseUtc(raw)?.format(CLAIMED_FMT) ?: raw
 
 /**
  * Парсит ISO-строку времени в UTC. Сервер отдаёт timestamp/дату в разных формах
@@ -513,6 +873,7 @@ private val previewProfile = StudentProfile(
             )),
         ),
     ),
+    invite = StudentInvite(InviteStatus.PENDING, "https://nivel-five.vercel.app/invite/abc123", null),
 )
 
 @Preview(showBackground = true, backgroundColor = 0xFF0E0E0E)

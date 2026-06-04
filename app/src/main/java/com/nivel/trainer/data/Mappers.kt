@@ -12,14 +12,17 @@ import com.nivel.trainer.data.remote.SessionDto
 import com.nivel.trainer.data.remote.ShadowStudentResponse
 import com.nivel.trainer.data.remote.StudentDetailResponse
 import com.nivel.trainer.data.remote.StudentDto
+import com.nivel.trainer.data.remote.StudentInviteResponse
 import com.nivel.trainer.data.remote.StudentSessionDto
 import com.nivel.trainer.domain.Goal
 import com.nivel.trainer.domain.InsightCard
+import com.nivel.trainer.domain.InviteStatus
 import com.nivel.trainer.domain.MasterPlan
 import com.nivel.trainer.domain.MasterPlanItem
 import com.nivel.trainer.domain.MasterPlanSection
 import com.nivel.trainer.domain.ShadowStudent
 import com.nivel.trainer.domain.Student
+import com.nivel.trainer.domain.StudentInvite
 import com.nivel.trainer.domain.StudentProfile
 import com.nivel.trainer.domain.StudentSession
 import com.nivel.trainer.domain.TrainingSession
@@ -171,8 +174,11 @@ fun MasterPlanDto.toDomain() = MasterPlan(
     sections = sections.sortedBy { it.sortOrder }.map { it.toDomain() },
 )
 
-/** Склейка detail + master-plan в единую доменную модель профиля. */
-fun StudentDetailResponse.toDomain(masterPlan: MasterPlanDto?) = StudentProfile(
+/** Склейка detail + master-plan (+ приглашение, E3) в доменную модель профиля. */
+fun StudentDetailResponse.toDomain(
+    masterPlan: MasterPlanDto?,
+    invite: StudentInvite? = null,
+) = StudentProfile(
     id = id,
     fullName = fullName,
     email = email,
@@ -180,4 +186,23 @@ fun StudentDetailResponse.toDomain(masterPlan: MasterPlanDto?) = StudentProfile(
     goals = goals.map { it.toDomain() },
     sessions = sessions.map { it.toDomain() },
     masterPlan = masterPlan?.toDomain(),
+    invite = invite,
 )
+
+// --- E3 (#26): статус приглашения ---
+
+/**
+ * Статус приглашения → доменная модель. `baseUrl` — базовый URL бэкенда (он же
+ * NIVEL_URL): claim-ссылку собираем как `{base}/invite/{token}` (как в web InviteBlock).
+ */
+fun StudentInviteResponse.toDomain(baseUrl: String): StudentInvite {
+    val mapped = when (status) {
+        "pending" -> InviteStatus.PENDING
+        "claimed" -> InviteStatus.CLAIMED
+        "revoked" -> InviteStatus.REVOKED
+        "none" -> InviteStatus.NONE
+        else -> InviteStatus.UNKNOWN
+    }
+    val claimUrl = token?.takeIf { it.isNotBlank() }?.let { "${baseUrl.trimEnd('/')}/invite/$it" }
+    return StudentInvite(status = mapped, claimUrl = claimUrl, claimedAt = claimedAt)
+}

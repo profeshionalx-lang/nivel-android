@@ -3,12 +3,15 @@ package com.nivel.trainer.feature
 import androidx.compose.ui.Modifier
 import androidx.compose.runtime.Composable
 import androidx.navigation.NavHostController
+import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
+import androidx.navigation.navArgument
 import com.nivel.trainer.feature.auth.LoginScreen
 import com.nivel.trainer.feature.auth.SplashScreen
 import com.nivel.trainer.feature.home.HomeScreen
 import com.nivel.trainer.feature.home.StudentsListScreen
+import com.nivel.trainer.feature.student.StudentProfileScreen
 
 /** Маршруты приложения. Расширяется по мере добавления экранов (B4/B5/B6 …). */
 object NivelRoutes {
@@ -16,6 +19,11 @@ object NivelRoutes {
     const val LOGIN = "login"
     const val HOME = "home"
     const val STUDENTS = "students"
+
+    /** Профиль ученика (B5). Аргумент — id ученика. */
+    const val STUDENT_ARG = "studentId"
+    const val STUDENT_PROFILE = "students/{$STUDENT_ARG}"
+    fun studentProfile(studentId: String) = "students/$studentId"
 }
 
 /**
@@ -66,8 +74,23 @@ fun NivelNavHost(
         composable(NivelRoutes.STUDENTS) {
             StudentsListScreen(
                 onClose = { navController.popBackStack() },
-                // Профиль ученика (B5) подключится здесь, когда экран появится.
-                onOpenStudent = { /* TODO(#B5): navController.navigate(student profile) */ },
+                onOpenStudent = { studentId ->
+                    navController.navigate(NivelRoutes.studentProfile(studentId))
+                },
+            )
+        }
+
+        // B5 (#8) — профиль ученика (просмотр): цели, сессии, мастер-план.
+        composable(
+            route = NivelRoutes.STUDENT_PROFILE,
+            arguments = listOf(navArgument(NivelRoutes.STUDENT_ARG) { type = NavType.StringType }),
+        ) { backStackEntry ->
+            val studentId = backStackEntry.arguments?.getString(NivelRoutes.STUDENT_ARG).orEmpty()
+            StudentProfileScreen(
+                studentId = studentId,
+                onBack = { navController.popBackStack() },
+                // Карточка тренировки (B6) подключится здесь, когда экран появится.
+                onOpenSession = { /* TODO(#B6): navController.navigate(session card) */ },
             )
         }
     }

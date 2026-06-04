@@ -4,7 +4,6 @@ import com.nivel.trainer.data.local.InsightCardEntity
 import com.nivel.trainer.data.local.SessionEntity
 import com.nivel.trainer.data.local.StudentEntity
 import com.nivel.trainer.data.remote.GoalDto
-import com.nivel.trainer.data.remote.InsightCardDto
 import com.nivel.trainer.data.remote.MasterPlanDto
 import com.nivel.trainer.data.remote.MasterPlanItemDto
 import com.nivel.trainer.data.remote.MasterPlanSectionDto
@@ -99,24 +98,8 @@ fun SessionEntity.toDomain() = TrainingSession(
 )
 
 // --- Insight cards ---
-
-fun InsightCardDto.toEntity() = InsightCardEntity(
-    id = id,
-    sessionId = sessionId,
-    studentId = studentId,
-    trainerId = trainerId,
-    title = title,
-    body = body,
-    quote = quote,
-    frontText = frontText,
-    contextText = contextText,
-    tags = tags?.takeIf { it.isNotEmpty() }?.joinToString(TAGS_SEPARATOR),
-    source = source,
-    trainerStatus = trainerStatus,
-    studentDecision = studentDecision,
-    position = position,
-    createdAt = createdAt,
-)
+// DTO->Entity маппер карточки — это [SessionInsightCardDto.toEntity] ниже (блок B6):
+// карточки приходят из `…/insight-cards` без session_id, поэтому он берётся из пути.
 
 fun InsightCardEntity.toDomain() = InsightCard(
     id = id,

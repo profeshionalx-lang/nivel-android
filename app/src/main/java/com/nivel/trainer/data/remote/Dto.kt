@@ -89,25 +89,10 @@ data class SessionDto(
     @SerialName("created_at") val createdAt: String? = null,
 )
 
-/** Инсайт-карточка (разбор ошибки). Источник — `insight_cards`. */
-@Serializable
-data class InsightCardDto(
-    val id: String,
-    @SerialName("session_id") val sessionId: String,
-    @SerialName("student_id") val studentId: String? = null,
-    @SerialName("trainer_id") val trainerId: String? = null,
-    val title: String? = null,
-    val body: String? = null,
-    val quote: String? = null,
-    @SerialName("front_text") val frontText: String? = null,
-    @SerialName("context_text") val contextText: String? = null,
-    val tags: List<String>? = null,
-    val source: String? = null,
-    @SerialName("trainer_status") val trainerStatus: String? = null,
-    @SerialName("student_decision") val studentDecision: String? = null,
-    val position: Int = 0,
-    @SerialName("created_at") val createdAt: String? = null,
-)
+// Инсайт-карточки сессии приходят из `…/insight-cards` в обёртке `{ cards }`
+// без session_id/student_id/trainer_id — их DTO определён ниже как
+// [SessionInsightCardDto] (блок B6). Прежний широкий `InsightCardDto` удалён,
+// т.к. реальный эндпоинт его шейп не отдаёт.
 
 /**
  * Тело запроса обмена Firebase ID token на bearer-сессию.
@@ -268,8 +253,7 @@ data class SessionInsightCardsResponse(
 
 /**
  * Карточка из `getSessionInsightCardsCore`: без session_id/student_id/trainer_id
- * (их даёт путь/контекст запроса). Отдельный DTO от [InsightCardDto], шейп
- * которого шире и требует session_id — переиспользовать его нельзя.
+ * (их даёт путь/контекст запроса). session_id для кэша/домена подставляем из пути.
  */
 @Serializable
 data class SessionInsightCardDto(

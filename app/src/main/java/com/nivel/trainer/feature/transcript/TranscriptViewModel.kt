@@ -6,6 +6,7 @@ import com.nivel.trainer.data.repository.TranscriptRepository
 import com.nivel.trainer.domain.Transcript
 import com.nivel.trainer.domain.TranscriptStatus
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -46,6 +47,10 @@ class TranscriptViewModel @Inject constructor(
 
     private var sessionId: String? = null
 
+    /** Текущая корутина загрузки/опроса. Перед новым [refresh] отменяем старую,
+     * чтобы не плодить параллельные циклы опроса (дубль запросов каждые 3с). */
+    private var loadJob: Job? = null
+
     /**
      * Вызывается экраном с id из навигации. Идемпотентна: повторные вызовы для
      * того же id (recompose, возврат на экран) не перезапускают загрузку.
@@ -62,8 +67,11 @@ class TranscriptViewModel @Inject constructor(
      */
     fun refresh() {
         val id = sessionId ?: return
+        // Отменяем предыдущую загрузку/опрос — иначе повторный refresh («Повторить»
+        // или возврат на экран) запустил бы второй цикл опроса параллельно первому.
+        loadJob?.cancel()
         _uiState.update { it.copy(loading = true, error = null) }
-        viewModelScope.launch {
+        loadJob = viewModelScope.launch {
             loadOnce(id)
             pollWhileProcessing(id)
         }

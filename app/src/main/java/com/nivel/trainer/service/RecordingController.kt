@@ -80,8 +80,15 @@ class RecordingController @Inject constructor(
         ContextCompat.startForegroundService(context, intent)
     }
 
-    /** Остановить запись и завершить сервис. Файл остаётся на диске для заливки. */
+    /**
+     * Остановить запись и завершить сервис. Файл остаётся на диске для заливки.
+     *
+     * Команду шлём только когда запись реально идёт: тогда сервис жив в foreground и
+     * `startService` гарантированно доставит интент. Иначе (записи нет) — не стартуем
+     * сервис в фоне: на Android 8+ запуск фонового сервиса из фона бросает исключение.
+     */
     fun stop() {
+        if (_state.value !is RecordingState.Recording) return
         val intent = Intent(context, RecordingService::class.java).apply {
             action = RecordingService.ACTION_STOP
         }

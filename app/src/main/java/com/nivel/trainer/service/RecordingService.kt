@@ -132,6 +132,9 @@ class RecordingService : Service() {
         }
 
         val durationMs = SystemClock.elapsedRealtime() - startedElapsedRealtimeMs
+        // TODO(C4): для очень длинных записей финализация moov-атома в stop() может
+        // занять заметное время — вынести stop()/release() в фоновый поток, чтобы не
+        // блокировать main и не рисковать ANR. Для C1 (первый срез) — синхронно.
         val stoppedOk = runCatching {
             mr.stop()
         }.isSuccess

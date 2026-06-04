@@ -1,6 +1,7 @@
 package com.nivel.trainer.service
 
 /*
- * Сервисный слой — foreground service записи (RecordingService) и WorkManager-воркеры
- * заливки. Реализуется в эпике 2 (диктофон). Пакет создан в scaffold-задаче B1.
+ * Сервисный слой эпика 2 (диктофон).
+ *  - RecordingService + RecordingController — foreground-запись (C1, готово).
+ *  - WorkManager-воркеры заливки — C3 (далее).
  */

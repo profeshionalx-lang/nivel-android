@@ -222,3 +222,38 @@ data class MasterPlanItemDto(
     @SerialName("image_url") val imageUrl: String? = null,
     @SerialName("sort_order") val sortOrder: Int = 0,
 )
+
+// -----------------------------------------------------------------------------
+// C3 (#12) — аудио-конвейер: signed upload URL + запуск транскрипции (A4).
+// Контракт сверен по route-файлам NIVEL:
+//   POST /api/v1/sessions/{id}/audio/upload-url  { ext? } -> { uploadUrl, storagePath }
+//   POST /api/v1/sessions/{id}/transcribe        { storagePath } -> { ok }
+// -----------------------------------------------------------------------------
+
+/** Тело `…/audio/upload-url`. `ext` — расширение файла записи (по умолчанию m4a). */
+@Serializable
+data class UploadUrlRequest(
+    val ext: String = "m4a",
+)
+
+/**
+ * Ответ `…/audio/upload-url` (`requestAudioUploadUrlCore`): абсолютный Supabase
+ * signed-URL для прямого PUT файла + путь в bucket для последующего transcribe.
+ */
+@Serializable
+data class UploadUrlResponse(
+    val uploadUrl: String,
+    val storagePath: String,
+)
+
+/** Тело `…/transcribe`: путь загруженного файла, полученный из upload-url. */
+@Serializable
+data class TranscribeRequest(
+    val storagePath: String,
+)
+
+/** Ответ `…/transcribe`: `{ ok }` при успешном запуске/завершении расшифровки. */
+@Serializable
+data class TranscribeResponse(
+    val ok: Boolean = true,
+)

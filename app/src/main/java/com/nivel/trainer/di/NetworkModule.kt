@@ -2,6 +2,7 @@ package com.nivel.trainer.di
 
 import com.jakewharton.retrofit2.converter.kotlinx.serialization.asConverterFactory
 import com.nivel.trainer.BuildConfig
+import com.nivel.trainer.data.remote.AudioPipelineApi
 import com.nivel.trainer.data.remote.AuthInterceptor
 import com.nivel.trainer.data.remote.NivelApi
 import dagger.Module
@@ -13,7 +14,25 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.logging.HttpLoggingInterceptor
 import retrofit2.Retrofit
+import java.util.concurrent.TimeUnit
+import javax.inject.Qualifier
 import javax.inject.Singleton
+
+/**
+ * Клиент аудио-конвейера (C3): наш API с bearer, но с большими таймаутами —
+ * `…/transcribe` блокируется до конца STT (`maxDuration=300`).
+ */
+@Qualifier
+@Retention(AnnotationRetention.BINARY)
+annotation class PipelineClient
+
+/**
+ * Клиент для прямого PUT файла на Supabase signed-URL: БЕЗ [AuthInterceptor]
+ * (наш JWT не должен уходить в Storage) и с большими таймаутами под загрузку.
+ */
+@Qualifier
+@Retention(AnnotationRetention.BINARY)
+annotation class UploadClient
 
 /**
  * Hilt-модуль сетевого слоя: Json (kotlinx.serialization), OkHttp с bearer-интерсептором
@@ -60,4 +79,62 @@ object NetworkModule {
     @Provides
     @Singleton
     fun provideNivelApi(retrofit: Retrofit): NivelApi = retrofit.create(NivelApi::class.java)
+
+    // --- C3 (#12): аудио-конвейер (большие таймауты, отдельные клиенты) ---
+
+    private fun loggingInterceptor(): HttpLoggingInterceptor =
+        HttpLoggingInterceptor().apply {
+            // Тело не логируем даже в debug — это аудио/бинарь, забьёт лог.
+            level = if (BuildConfig.DEBUG) HttpLoggingInterceptor.Level.HEADERS
+            else HttpLoggingInterceptor.Level.NONE
+        }
+
+    /**
+     * Клиент для вызовов нашего API в конвейере (upload-url + transcribe): с
+     * bearer-интерсептором, но большим read-timeout — transcribe ждёт STT.
+     * callTimeout не задаём (0): общий лимит оборвал бы длинную расшифровку.
+     */
+    @Provides
+    @Singleton
+    @PipelineClient
+    fun providePipelineClient(authInterceptor: AuthInterceptor): OkHttpClient =
+        OkHttpClient.Builder()
+            .addInterceptor(authInterceptor)
+            .addInterceptor(loggingInterceptor())
+            .connectTimeout(30, TimeUnit.SECONDS)
+            .readTimeout(6, TimeUnit.MINUTES)
+            .writeTimeout(2, TimeUnit.MINUTES)
+            .build()
+
+    /**
+     * Клиент для прямого PUT файла на Supabase signed-URL: БЕЗ нашего bearer,
+     * большой write-timeout под выгрузку длинной записи (≈90 мин ⇒ десятки МБ).
+     */
+    @Provides
+    @Singleton
+    @UploadClient
+    fun provideUploadClient(): OkHttpClient =
+        OkHttpClient.Builder()
+            .addInterceptor(loggingInterceptor())
+            .connectTimeout(30, TimeUnit.SECONDS)
+            .readTimeout(2, TimeUnit.MINUTES)
+            .writeTimeout(15, TimeUnit.MINUTES)
+            .build()
+
+    @Provides
+    @Singleton
+    @PipelineClient
+    fun providePipelineRetrofit(@PipelineClient client: OkHttpClient, json: Json): Retrofit {
+        val contentType = "application/json".toMediaType()
+        return Retrofit.Builder()
+            .baseUrl(BuildConfig.API_BASE_URL)
+            .client(client)
+            .addConverterFactory(json.asConverterFactory(contentType))
+            .build()
+    }
+
+    @Provides
+    @Singleton
+    fun provideAudioPipelineApi(@PipelineClient retrofit: Retrofit): AudioPipelineApi =
+        retrofit.create(AudioPipelineApi::class.java)
 }

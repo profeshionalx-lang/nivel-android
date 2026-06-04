@@ -81,7 +81,16 @@ class SessionDetailViewModel @Inject constructor(
         viewModelScope.launch {
             repository.getOverview(id)
                 .onSuccess { overview ->
-                    _uiState.update { it.copy(loading = false, overview = overview, error = null) }
+                    // Если сервер уже довёл анализ до ready — снимаем прежнюю ошибку генерации.
+                    val clearGenError = overview.audio?.analysisStatus == "ready"
+                    _uiState.update {
+                        it.copy(
+                            loading = false,
+                            overview = overview,
+                            error = null,
+                            generateError = if (clearGenError) null else it.generateError,
+                        )
+                    }
                 }
                 .onFailure { e ->
                     _uiState.update { it.copy(loading = false, error = mapError(e)) }

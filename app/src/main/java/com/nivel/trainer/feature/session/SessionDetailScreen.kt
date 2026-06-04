@@ -39,6 +39,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
@@ -99,7 +101,7 @@ fun SessionDetailScreen(
     val state by viewModel.uiState.collectAsStateWithLifecycle()
 
     // Авто-анализ запускает серверный аналайзер по готовому транскрипту (как pm2 в
-    // вебе). Пока статус idle/processing — поллим результат каждые 5с (как setInterval
+    // вебе). Пока статус idle/processing — поллим результат каждые 3с (как setInterval
     // в InsightsAnalysisStatus), чтобы карточки появились без ручного обновления.
     val audio = state.overview?.audio
     LaunchedEffect(audio?.transcriptStatus, audio?.analysisStatus, state.generating) {
@@ -138,8 +140,8 @@ fun SessionDetailScreen(
     }
 }
 
-/** Период поллинга статуса авто-анализа (как `setInterval(3000)` в вебе, чуть реже). */
-private const val POLL_INTERVAL_MS = 5_000L
+/** Период поллинга статуса авто-анализа (как `setInterval(3000)` в вебе). */
+private const val POLL_INTERVAL_MS = 3_000L
 
 @Composable
 private fun SessionDetailContent(
@@ -346,7 +348,7 @@ private fun CardsSection(
 
         if (cards.isEmpty()) {
             Text(
-                text = "Карточек пока нет.",
+                text = "Карточек пока нет — вставьте инсайты выше.",
                 color = OnSurfaceVariant,
                 fontSize = 14.sp,
             )
@@ -477,7 +479,12 @@ private fun AnalysisFailedCard(message: String, onRetry: () -> Unit) {
                 fontWeight = FontWeight.Bold,
             )
         }
-        Text(text = message, color = OnSurfaceVariant, fontSize = 12.sp)
+        Text(
+            text = message,
+            color = OnSurfaceVariant,
+            fontSize = 12.sp,
+            fontFamily = FontFamily.Monospace,
+        )
         PrimaryActionButton(text = "Повторить анализ", onClick = onRetry)
     }
 }
@@ -572,6 +579,7 @@ private fun PasteInsightsSheet(
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val clipboard = LocalClipboardManager.current
+    val focusRequester = remember { FocusRequester() }
     var copied by remember { mutableStateOf(false) }
     var showFormat by remember { mutableStateOf(false) }
 
@@ -581,6 +589,9 @@ private fun PasteInsightsSheet(
             copied = false
         }
     }
+
+    // autoFocus как в вебе — фокус в поле markdown сразу при открытии шита.
+    LaunchedEffect(Unit) { runCatching { focusRequester.requestFocus() } }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -640,7 +651,8 @@ private fun PasteInsightsSheet(
                 placeholder = { Text("Вставьте markdown-ответ от Claude…", color = OnSurfaceVariant) },
                 modifier = Modifier
                     .fillMaxWidth()
-                    .heightIn(min = 200.dp),
+                    .heightIn(min = 200.dp)
+                    .focusRequester(focusRequester),
                 shape = RoundedCornerShape(12.dp),
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedTextColor = OnSurface,

@@ -39,9 +39,14 @@ class StudentProfileViewModel @Inject constructor(
 
     private var studentId: String? = null
 
-    /** Вызывается экраном один раз с id из навигации; повторные вызовы игнорируются. */
+    /**
+     * Вызывается экраном с id из навигации. Идемпотентна: для уже принятого id
+     * повторные вызовы (recompose, возврат на экран) не перезапускают загрузку —
+     * иначе при пересоздании composable во время первого запроса полетел бы
+     * дубль. Повтор после ошибки — через [refresh] (кнопка «Повторить»).
+     */
     fun load(studentId: String) {
-        if (this.studentId == studentId && _uiState.value.profile != null) return
+        if (this.studentId == studentId) return
         this.studentId = studentId
         refresh()
     }

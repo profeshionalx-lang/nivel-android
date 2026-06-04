@@ -222,3 +222,67 @@ data class MasterPlanItemDto(
     @SerialName("image_url") val imageUrl: String? = null,
     @SerialName("sort_order") val sortOrder: Int = 0,
 )
+
+// -----------------------------------------------------------------------------
+// B6 (#9) — карточка тренировки (просмотр): детали + статус аудио + карточки.
+// Контракт сверен по route-файлам NIVEL: sessions/[id], .../transcript/status,
+// .../insight-cards (core: getSessionDetailCore, getTranscriptStatusCore,
+// getSessionInsightCardsCore). Добавлено в конец файла, чтобы минимизировать diff.
+// -----------------------------------------------------------------------------
+
+/**
+ * Ответ `GET /api/v1/sessions/{id}` (`getSessionDetailCore`). `session_number`
+ * nullable (как в core). Поле `exercises` НЕ объявляем: на экране сессии
+ * упражнения не рендерятся (решение по #9, как веб-страница сессии), а
+ * `ignoreUnknownKeys=true` молча пропустит его в ответе. `created_at` эндпоинт
+ * не возвращает — дату на экране берём из `completed_at`/`scheduled_at`.
+ */
+@Serializable
+data class SessionDetailResponse(
+    val id: String,
+    @SerialName("goal_id") val goalId: String? = null,
+    @SerialName("session_number") val sessionNumber: Int? = null,
+    val status: String,
+    @SerialName("trainer_notes") val trainerNotes: String? = null,
+    @SerialName("scheduled_at") val scheduledAt: String? = null,
+    @SerialName("completed_at") val completedAt: String? = null,
+)
+
+/**
+ * Ответ `GET /api/v1/sessions/{id}/transcript/status` (`getTranscriptStatusCore`):
+ * статус транскрипции + анализа. 404 — записи/транскрипта ещё нет.
+ */
+@Serializable
+data class SessionTranscriptStatusResponse(
+    val status: String,
+    @SerialName("error_message") val errorMessage: String? = null,
+    @SerialName("analysis_status") val analysisStatus: String = "idle",
+    @SerialName("analysis_error") val analysisError: String? = null,
+)
+
+/** Ответ `GET /api/v1/sessions/{id}/insight-cards` — обёртка `{ cards }`. */
+@Serializable
+data class SessionInsightCardsResponse(
+    val cards: List<SessionInsightCardDto> = emptyList(),
+)
+
+/**
+ * Карточка из `getSessionInsightCardsCore`: без session_id/student_id/trainer_id
+ * (их даёт путь/контекст запроса). Отдельный DTO от [InsightCardDto], шейп
+ * которого шире и требует session_id — переиспользовать его нельзя.
+ */
+@Serializable
+data class SessionInsightCardDto(
+    val id: String,
+    val title: String? = null,
+    val body: String? = null,
+    val quote: String? = null,
+    val tags: List<String>? = null,
+    @SerialName("front_text") val frontText: String? = null,
+    @SerialName("context_text") val contextText: String? = null,
+    val source: String? = null,
+    @SerialName("trainer_status") val trainerStatus: String? = null,
+    @SerialName("student_decision") val studentDecision: String? = null,
+    val position: Int = 0,
+    @SerialName("created_at") val createdAt: String? = null,
+)

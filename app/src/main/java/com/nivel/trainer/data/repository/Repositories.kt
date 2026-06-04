@@ -104,7 +104,8 @@ class DefaultInsightCardRepository @Inject constructor(
         dao.observeBySession(sessionId).map { list -> list.map { it.toDomain() } }
 
     override suspend fun refreshCards(sessionId: String): Result<Unit> = runCatching {
-        val remote = api.getSessionCards(sessionId)
-        dao.replaceForSession(sessionId, remote.map { it.toEntity() })
+        // Эндпоинт `…/insight-cards` отдаёт обёртку `{ cards }`; sessionId — из пути.
+        val remote = api.getSessionCards(sessionId).cards
+        dao.replaceForSession(sessionId, remote.map { it.toEntity(sessionId) })
     }
 }

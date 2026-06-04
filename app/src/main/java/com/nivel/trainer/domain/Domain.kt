@@ -118,3 +118,43 @@ data class MasterPlanItem(
     val description: String?,
     val imageUrl: String?,
 )
+
+// --- B6 (#9): карточка тренировки (просмотр) ---
+
+/**
+ * Детали сессии для экрана карточки тренировки. Упражнения в модель не тянем —
+ * на экране сессии они не показываются (решение по #9, как веб-страница сессии).
+ * `sessionNumber` nullable (контракт `getSessionDetailCore`).
+ */
+data class SessionDetail(
+    val id: String,
+    val goalId: String?,
+    val sessionNumber: Int?,
+    val status: String,
+    val trainerNotes: String?,
+    val scheduledAt: String?,
+    val completedAt: String?,
+)
+
+/**
+ * Статус обработки аудио сессии: транскрипция + анализ карточек.
+ * На экране `null` означает «записи ещё нет» (эндпоинт статуса отдал 404).
+ */
+data class SessionAudioStatus(
+    /** processing | ready | failed (статус транскрипции). */
+    val transcriptStatus: String,
+    val transcriptError: String?,
+    /** idle | processing | ready | failed (статус AI-анализа). */
+    val analysisStatus: String,
+    val analysisError: String?,
+)
+
+/**
+ * Полное состояние экрана карточки тренировки (B6): детали + статус аудио +
+ * инсайт-карточки сессии. Карточки — переиспользуем доменный [InsightCard].
+ */
+data class SessionOverview(
+    val detail: SessionDetail,
+    val audio: SessionAudioStatus?,
+    val cards: List<InsightCard>,
+)

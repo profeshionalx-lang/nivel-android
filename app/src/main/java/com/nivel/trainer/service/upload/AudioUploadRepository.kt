@@ -66,7 +66,11 @@ class AudioUploadRepository @Inject constructor(
         try {
             api.transcribe(sessionId, TranscribeRequest(storagePath = urlResp.storagePath))
         } catch (e: HttpException) {
-            return httpToOutcome(e, "transcribe")
+            // 502 = STT провалился (часто детерминированно: битый/неподдерживаемый
+            // звук). Повтор = заново upload-url + PUT всего файла, а STT упадёт так же
+            // → считаем постоянным сбоем. Прочие 5xx (500/503) — временные, ретраим.
+            return if (e.code() == 502) UploadOutcome.PermanentFailure("transcribe 502")
+            else httpToOutcome(e, "transcribe")
         } catch (e: IOException) {
             return UploadOutcome.Retry("Сеть (transcribe): ${e.message}")
         }
@@ -80,10 +84,11 @@ class AudioUploadRepository @Inject constructor(
     /** PUT файла на signed-URL. Возвращает не-null исход при сбое, null — успех. */
     private suspend fun putFile(uploadUrl: String, file: File, ext: String): UploadOutcome? =
         withContext(Dispatchers.IO) {
+            // signed-URL одноразовый под конкретный storagePath (каждый ретрай —
+            // новый путь), поэтому x-upsert не нужен: перезаписывать нечего.
             val request = Request.Builder()
                 .url(uploadUrl)
                 .put(file.asRequestBody(contentTypeFor(ext).toMediaType()))
-                .header("x-upsert", "true")
                 .build()
             try {
                 uploadClient.newCall(request).execute().use { resp ->

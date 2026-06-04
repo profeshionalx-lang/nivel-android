@@ -65,4 +65,22 @@ interface NivelApi {
      */
     @POST("api/v1/students/{studentId}/invite/revoke")
     suspend fun revokeInvite(@Path("studentId") studentId: String): OkResponse
+
+    // ---------------------------------------------------------------------------
+    // B5 (#8) — профиль ученика (просмотр): цели + сессии + мастер-план (read A3).
+    // ---------------------------------------------------------------------------
+
+    /**
+     * Профиль ученика с целями и сессиями (`GET /api/v1/students/{id}`).
+     * Trainer-only; тренер должен владеть учеником. 404 — нет такого ученика.
+     */
+    @GET("api/v1/students/{studentId}")
+    suspend fun getStudentDetail(@Path("studentId") studentId: String): StudentDetailResponse
+
+    /**
+     * Мастер-план ученика (`GET /api/v1/students/{id}/master-plan`).
+     * Обёртка `{ plan }`; `plan: null` когда плана ещё нет.
+     */
+    @GET("api/v1/students/{studentId}/master-plan")
+    suspend fun getStudentMasterPlan(@Path("studentId") studentId: String): MasterPlanResponse
 }

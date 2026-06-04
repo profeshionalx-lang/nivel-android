@@ -3,13 +3,25 @@ package com.nivel.trainer.data
 import com.nivel.trainer.data.local.InsightCardEntity
 import com.nivel.trainer.data.local.SessionEntity
 import com.nivel.trainer.data.local.StudentEntity
+import com.nivel.trainer.data.remote.GoalDto
 import com.nivel.trainer.data.remote.InsightCardDto
+import com.nivel.trainer.data.remote.MasterPlanDto
+import com.nivel.trainer.data.remote.MasterPlanItemDto
+import com.nivel.trainer.data.remote.MasterPlanSectionDto
 import com.nivel.trainer.data.remote.SessionDto
 import com.nivel.trainer.data.remote.ShadowStudentResponse
+import com.nivel.trainer.data.remote.StudentDetailResponse
 import com.nivel.trainer.data.remote.StudentDto
+import com.nivel.trainer.data.remote.StudentSessionDto
+import com.nivel.trainer.domain.Goal
 import com.nivel.trainer.domain.InsightCard
+import com.nivel.trainer.domain.MasterPlan
+import com.nivel.trainer.domain.MasterPlanItem
+import com.nivel.trainer.domain.MasterPlanSection
 import com.nivel.trainer.domain.ShadowStudent
 import com.nivel.trainer.domain.Student
+import com.nivel.trainer.domain.StudentProfile
+import com.nivel.trainer.domain.StudentSession
 import com.nivel.trainer.domain.TrainingSession
 
 /**
@@ -117,4 +129,55 @@ fun InsightCardEntity.toDomain() = InsightCard(
     studentDecision = studentDecision,
     position = position,
     createdAt = createdAt,
+)
+
+// --- B5 (#8): профиль ученика (DTO → domain напрямую, без Room) ---
+// Точечный экран чтения; кэш не обязателен по acceptance, источник правды — сервер.
+
+fun GoalDto.toDomain() = Goal(
+    id = id,
+    customProblem = customProblem,
+    status = status,
+    createdAt = createdAt,
+)
+
+fun StudentSessionDto.toDomain() = StudentSession(
+    id = id,
+    goalId = goalId,
+    sessionNumber = sessionNumber,
+    status = status,
+    scheduledAt = scheduledAt,
+    completedAt = completedAt,
+    createdAt = createdAt,
+)
+
+fun MasterPlanItemDto.toDomain() = MasterPlanItem(
+    id = id,
+    title = title,
+    description = description,
+    imageUrl = imageUrl,
+)
+
+fun MasterPlanSectionDto.toDomain() = MasterPlanSection(
+    id = id,
+    title = title,
+    category = category,
+    // Пункты упорядочиваем по sort_order — сервер уже сортирует, но дублируем для надёжности.
+    items = items.sortedBy { it.sortOrder }.map { it.toDomain() },
+)
+
+fun MasterPlanDto.toDomain() = MasterPlan(
+    id = id,
+    sections = sections.sortedBy { it.sortOrder }.map { it.toDomain() },
+)
+
+/** Склейка detail + master-plan в единую доменную модель профиля. */
+fun StudentDetailResponse.toDomain(masterPlan: MasterPlanDto?) = StudentProfile(
+    id = id,
+    fullName = fullName,
+    email = email,
+    avatarUrl = avatarUrl,
+    goals = goals.map { it.toDomain() },
+    sessions = sessions.map { it.toDomain() },
+    masterPlan = masterPlan?.toDomain(),
 )

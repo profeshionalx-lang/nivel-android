@@ -1,6 +1,7 @@
 package com.nivel.trainer.feature.session
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -14,20 +15,34 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -41,6 +56,7 @@ import com.nivel.trainer.domain.SessionAudioStatus
 import com.nivel.trainer.domain.SessionDetail
 import com.nivel.trainer.domain.SessionOverview
 import com.nivel.trainer.ui.theme.NivelTheme
+import kotlinx.coroutines.delay
 import java.time.OffsetDateTime
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
@@ -51,6 +67,9 @@ private val Background = Color(0xFF0E0E0E)            // --background
 private val SurfaceLow = Color(0xFF161616)           // --surface-low
 private val SurfaceCard = Color(0xFF1E1E1E)          // --surface-card
 private val Primary = Color(0xFFCAFD00)              // --primary (лайм)
+private val OnPrimary = Color(0xFF000000)            // text на primary
+private val SurfaceElevated = Color(0xFF262626)      // --surface-elevated (поле ввода)
+private val BorderDim = Color(0xFF2E2E2E)            // --border-dim
 private val Amber = Color(0xFFFBBF24)               // amber-400 (метка черновиков)
 private val OnSurface = Color(0xFFF5F5F5)            // --on-surface
 private val OnSurfaceVariant = Color(0xFFADAAAA)     // --on-surface-variant
@@ -79,15 +98,48 @@ fun SessionDetailScreen(
     LaunchedEffect(sessionId) { viewModel.load(sessionId) }
     val state by viewModel.uiState.collectAsStateWithLifecycle()
 
+    // Авто-анализ запускает серверный аналайзер по готовому транскрипту (как pm2 в
+    // вебе). Пока статус idle/processing — поллим результат каждые 5с (как setInterval
+    // в InsightsAnalysisStatus), чтобы карточки появились без ручного обновления.
+    val audio = state.overview?.audio
+    LaunchedEffect(audio?.transcriptStatus, audio?.analysisStatus, state.generating) {
+        if (!state.generating &&
+            audio?.transcriptStatus == "ready" &&
+            (audio.analysisStatus == "idle" || audio.analysisStatus == "processing")
+        ) {
+            while (true) {
+                delay(POLL_INTERVAL_MS)
+                viewModel.refresh()
+            }
+        }
+    }
+
     SessionDetailContent(
         loading = state.loading,
         error = state.error,
         overview = state.overview,
+        generating = state.generating,
+        generateError = state.generateError,
+        onGenerate = viewModel::generateInsights,
+        onOpenPaste = viewModel::openPasteSheet,
         onBack = onBack,
         onRetry = viewModel::refresh,
         modifier = modifier,
     )
+
+    val sheet = state.pasteSheet
+    if (sheet is PasteSheetState.Open) {
+        PasteInsightsSheet(
+            state = sheet,
+            onMarkdownChange = viewModel::onPasteMarkdownChange,
+            onSubmit = viewModel::submitPaste,
+            onDismiss = viewModel::closePasteSheet,
+        )
+    }
 }
+
+/** Период поллинга статуса авто-анализа (как `setInterval(3000)` в вебе, чуть реже). */
+private const val POLL_INTERVAL_MS = 5_000L
 
 @Composable
 private fun SessionDetailContent(
@@ -97,6 +149,10 @@ private fun SessionDetailContent(
     onBack: () -> Unit,
     onRetry: () -> Unit,
     modifier: Modifier = Modifier,
+    generating: Boolean = false,
+    generateError: String? = null,
+    onGenerate: () -> Unit = {},
+    onOpenPaste: () -> Unit = {},
 ) {
     Column(
         modifier = modifier
@@ -110,7 +166,13 @@ private fun SessionDetailContent(
 
             error != null && overview == null -> CenterBox { ErrorState(error, onRetry) }
 
-            overview != null -> SessionBody(overview)
+            overview != null -> SessionBody(
+                overview = overview,
+                generating = generating,
+                generateError = generateError,
+                onGenerate = onGenerate,
+                onOpenPaste = onOpenPaste,
+            )
 
             else -> CenterBox { EmptyState() }
         }
@@ -146,7 +208,13 @@ private fun Header(title: String, onBack: () -> Unit) {
 }
 
 @Composable
-private fun SessionBody(overview: SessionOverview) {
+private fun SessionBody(
+    overview: SessionOverview,
+    generating: Boolean,
+    generateError: String?,
+    onGenerate: () -> Unit,
+    onOpenPaste: () -> Unit,
+) {
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 8.dp, bottom = 48.dp),
@@ -154,7 +222,16 @@ private fun SessionBody(overview: SessionOverview) {
     ) {
         item { StatusBlock(overview.detail) }
         item { AudioSection(overview.audio) }
-        item { CardsSection(overview.audio, overview.cards) }
+        item {
+            CardsSection(
+                audio = overview.audio,
+                cards = overview.cards,
+                generating = generating,
+                generateError = generateError,
+                onGenerate = onGenerate,
+                onOpenPaste = onOpenPaste,
+            )
+        }
     }
 }
 
@@ -208,18 +285,38 @@ private fun AudioSection(audio: SessionAudioStatus?) {
     }
 }
 
-/** Секция «Карточки» (веб, trainer): статус анализа + черновики + approved. */
+/**
+ * Секция «Карточки» (веб, trainer): статус авто-анализа + кнопка вставки инсайтов
+ * + черновики + approved. Порядок один-в-один с вебом (`sessions/[id]/page.tsx`).
+ */
 @Composable
-private fun CardsSection(audio: SessionAudioStatus?, cards: List<InsightCard>) {
+private fun CardsSection(
+    audio: SessionAudioStatus?,
+    cards: List<InsightCard>,
+    generating: Boolean,
+    generateError: String?,
+    onGenerate: () -> Unit,
+    onOpenPaste: () -> Unit,
+) {
     val drafts = cards.filter { it.trainerStatus == "draft" }
     val approved = cards.filter { it.trainerStatus == "approved" }
 
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
         Label("Карточки")
 
-        analysisLine(audio)?.let { (text, color) ->
-            Text(text = text, color = color, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+        // Статус авто-анализа — только при готовом транскрипте (как InsightsAnalysisStatus).
+        if (audio?.transcriptStatus == "ready") {
+            AnalysisStatus(
+                analysisStatus = audio.analysisStatus,
+                analysisError = audio.analysisError,
+                generating = generating,
+                generateError = generateError,
+                onGenerate = onGenerate,
+            )
         }
+
+        // Вставить инсайты от Claude — доступно тренеру всегда (как PasteInsightsButton).
+        PasteInsightButton(onClick = onOpenPaste)
 
         if (drafts.isNotEmpty()) {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -299,6 +396,335 @@ private fun CardView(card: InsightCard) {
     }
 }
 
+// --- D2 (#20): статус авто-анализа и вставка инсайтов ---
+
+/**
+ * Статус авто-анализа транскрипта (порт веб-`InsightsAnalysisStatus`). Рендерится
+ * только при готовом транскрипте. idle/processing → спиннер; failed → ошибка с
+ * «Повторить анализ»; ready → «Перегенерировать инсайты». Ручная генерация
+ * (`generating`) и её ошибка (`generateError`) приоритетнее серверного статуса.
+ */
+@Composable
+private fun AnalysisStatus(
+    analysisStatus: String,
+    analysisError: String?,
+    generating: Boolean,
+    generateError: String?,
+    onGenerate: () -> Unit,
+) {
+    when {
+        generating -> AnalysisSpinnerCard(
+            title = "ИИ анализирует транскрипт…",
+            subtitle = "Карточки появятся автоматически",
+        )
+        generateError != null -> AnalysisFailedCard(generateError, onGenerate)
+        analysisStatus == "processing" -> AnalysisSpinnerCard(
+            title = "ИИ анализирует транскрипт…",
+            subtitle = "Карточки появятся автоматически",
+        )
+        analysisStatus == "idle" -> AnalysisSpinnerCard(
+            title = "Анализ в очереди…",
+            subtitle = "Появится в течение 5 минут",
+        )
+        analysisStatus == "failed" -> AnalysisFailedCard(
+            message = analysisError?.takeIf { it.isNotBlank() } ?: "Не удалось проанализировать",
+            onRetry = onGenerate,
+        )
+        else -> RegenerateButton(onGenerate) // ready
+    }
+}
+
+@Composable
+private fun AnalysisSpinnerCard(title: String, subtitle: String) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(SurfaceCard, RoundedCornerShape(16.dp))
+            .padding(16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        CircularProgressIndicator(
+            color = Primary,
+            strokeWidth = 2.dp,
+            modifier = Modifier.size(20.dp),
+        )
+        Column(modifier = Modifier.weight(1f)) {
+            Text(text = title, color = OnSurface, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+            Text(text = subtitle, color = OnSurfaceVariant, fontSize = 12.sp)
+        }
+    }
+}
+
+@Composable
+private fun AnalysisFailedCard(message: String, onRetry: () -> Unit) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(SurfaceCard, RoundedCornerShape(16.dp))
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text("⚠", color = ErrorColor, fontSize = 16.sp)
+            Text(
+                text = "Не удалось проанализировать",
+                color = OnSurface,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Bold,
+            )
+        }
+        Text(text = message, color = OnSurfaceVariant, fontSize = 12.sp)
+        PrimaryActionButton(text = "Повторить анализ", onClick = onRetry)
+    }
+}
+
+/** Кнопка «Перегенерировать инсайты» (ready) — bordered, центрированная (как в вебе). */
+@Composable
+private fun RegenerateButton(onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = TouchTarget)
+            .clickable(onClick = onClick)
+            .background(SurfaceCard, RoundedCornerShape(12.dp))
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.Center,
+    ) {
+        Text("↻ ", color = OnSurface, fontSize = 14.sp)
+        Text(
+            text = "Перегенерировать инсайты",
+            color = OnSurface,
+            fontSize = 14.sp,
+            fontWeight = FontWeight.Bold,
+        )
+    }
+}
+
+/** Карточка-кнопка «Вставить инсайты» — открывает шит (порт `PasteInsightsButton`). */
+@Composable
+private fun PasteInsightButton(onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = TouchTarget)
+            .clickable(onClick = onClick)
+            .background(SurfaceCard, RoundedCornerShape(16.dp))
+            .padding(16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Text("📋", fontSize = 18.sp)
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = "Вставить инсайты",
+                color = OnSurface,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Bold,
+            )
+            Text(
+                text = "Скопируйте ответ Claude и вставьте сюда",
+                color = OnSurfaceVariant,
+                fontSize = 12.sp,
+            )
+        }
+        Text("›", color = OnSurfaceVariant, fontSize = 20.sp)
+    }
+}
+
+/** Лаймовая кнопка действия (submit/retry) — как `kinetic-gradient` в вебе. */
+@Composable
+private fun PrimaryActionButton(text: String, onClick: () -> Unit, enabled: Boolean = true) {
+    Button(
+        onClick = onClick,
+        enabled = enabled,
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = TouchTarget),
+        shape = RoundedCornerShape(12.dp),
+        colors = ButtonDefaults.buttonColors(
+            containerColor = Primary,
+            contentColor = OnPrimary,
+            disabledContainerColor = Primary.copy(alpha = 0.4f),
+            disabledContentColor = OnPrimary,
+        ),
+    ) {
+        Text(text, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+    }
+}
+
+/**
+ * Шит «Вставить инсайты от Claude» (порт `PasteInsightsButton`-модалки): копирование
+ * промпт-шаблона, поле markdown, раскрывашка «Ожидаемый формат», ошибка парсинга
+ * (строка N), кнопки «Создать карточки»/«Закрыть». Mobile-first bottom-sheet.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun PasteInsightsSheet(
+    state: PasteSheetState.Open,
+    onMarkdownChange: (String) -> Unit,
+    onSubmit: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val clipboard = LocalClipboardManager.current
+    var copied by remember { mutableStateOf(false) }
+    var showFormat by remember { mutableStateOf(false) }
+
+    LaunchedEffect(copied) {
+        if (copied) {
+            delay(2000)
+            copied = false
+        }
+    }
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = SurfaceCard,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .widthIn(max = 430.dp)
+                .padding(horizontal = 24.dp)
+                .padding(bottom = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Text(
+                    text = "Вставить инсайты от Claude",
+                    color = OnSurface,
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Black,
+                    modifier = Modifier.weight(1f),
+                )
+                IconButton(onClick = onDismiss, modifier = Modifier.size(TouchTarget)) {
+                    Text("✕", color = OnSurfaceVariant, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+
+            // Скопировать промпт-шаблон (тренер вставляет его в Claude вручную).
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = TouchTarget)
+                    .clickable {
+                        clipboard.setText(AnnotatedString(InsightsPrompts.PROMPT))
+                        copied = true
+                    }
+                    .background(SurfaceElevated, RoundedCornerShape(12.dp))
+                    .padding(horizontal = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.Center,
+            ) {
+                Text(
+                    text = if (copied) "✓ Промпт скопирован" else "Скопировать промпт-шаблон",
+                    color = OnSurface,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold,
+                )
+            }
+
+            OutlinedTextField(
+                value = state.markdown,
+                onValueChange = onMarkdownChange,
+                placeholder = { Text("Вставьте markdown-ответ от Claude…", color = OnSurfaceVariant) },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 200.dp),
+                shape = RoundedCornerShape(12.dp),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedTextColor = OnSurface,
+                    unfocusedTextColor = OnSurface,
+                    focusedContainerColor = SurfaceElevated,
+                    unfocusedContainerColor = SurfaceElevated,
+                    focusedBorderColor = Primary,
+                    unfocusedBorderColor = BorderDim,
+                    cursorColor = Primary,
+                ),
+            )
+
+            // Ожидаемый формат — раскрывашка (как <details> в вебе).
+            Text(
+                text = if (showFormat) "▾ Ожидаемый формат" else "▸ Ожидаемый формат",
+                color = OnSurfaceVariant,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { showFormat = !showFormat }
+                    .padding(vertical = 4.dp),
+            )
+            if (showFormat) {
+                Text(
+                    text = InsightsPrompts.FORMAT_EXAMPLE,
+                    color = OnSurfaceVariant,
+                    fontSize = 11.sp,
+                    fontFamily = FontFamily.Monospace,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(SurfaceElevated, RoundedCornerShape(12.dp))
+                        .padding(12.dp),
+                )
+            }
+
+            state.error?.let { err ->
+                Text(
+                    text = err,
+                    color = ErrorColor,
+                    fontSize = 12.sp,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(ErrorColor.copy(alpha = 0.1f), RoundedCornerShape(12.dp))
+                        .padding(12.dp),
+                )
+            }
+
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(
+                    onClick = onSubmit,
+                    enabled = !state.submitting && state.markdown.isNotBlank(),
+                    modifier = Modifier
+                        .weight(1f)
+                        .heightIn(min = TouchTarget),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Primary,
+                        contentColor = OnPrimary,
+                        disabledContainerColor = Primary.copy(alpha = 0.4f),
+                        disabledContentColor = OnPrimary,
+                    ),
+                ) {
+                    Text(
+                        text = if (state.submitting) "Создаём…" else "Создать карточки",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 14.sp,
+                    )
+                }
+                TextButton(
+                    onClick = onDismiss,
+                    enabled = !state.submitting,
+                    modifier = Modifier
+                        .weight(1f)
+                        .heightIn(min = TouchTarget),
+                    shape = RoundedCornerShape(12.dp),
+                ) {
+                    Text("Закрыть", color = OnSurface, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+    }
+}
+
 /** Карточка-статус (аудио): глиф + заголовок (+ подзаголовок). */
 @Composable
 private fun StatusCard(glyph: String, title: String, subtitle: String?, accent: Color = OnSurfaceVariant) {
@@ -362,17 +788,6 @@ private fun CenterBox(content: @Composable () -> Unit) {
 private fun headerTitle(detail: SessionDetail?): String {
     val number = detail?.sessionNumber
     return if (number != null) "Сессия $number" else "Сессия"
-}
-
-/**
- * Строка анализа карточек (веб: InsightsAnalysisStatus). Показываем только когда
- * есть что сказать: анализ идёт или упал. `null` → строку не рендерим.
- */
-private fun analysisLine(audio: SessionAudioStatus?): Pair<String, Color>? = when (audio?.analysisStatus) {
-    "processing" -> "Анализ карточек…" to OnSurfaceVariant
-    "failed" -> (audio.analysisError?.takeIf { it.isNotBlank() }?.let { "Ошибка анализа: $it" }
-        ?: "Ошибка анализа") to ErrorColor
-    else -> null
 }
 
 /**

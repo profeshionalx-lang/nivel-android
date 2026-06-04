@@ -270,3 +270,32 @@ data class SessionInsightCardDto(
     val position: Int = 0,
     @SerialName("created_at") val createdAt: String? = null,
 )
+
+// -----------------------------------------------------------------------------
+// D2 (#20) — создание инсайтов: вставка (paste) + авто-генерация (write A5).
+// Контракт сверен по route-файлам NIVEL: insights/paste, insights/generate
+// (core: pasteInsightsFromClaudeCore, generateAiInsightsCore).
+// -----------------------------------------------------------------------------
+
+/** Тело `POST /api/v1/sessions/{id}/insights/paste` — markdown-ответ от Claude. */
+@Serializable
+data class PasteInsightsRequest(
+    val markdown: String,
+)
+
+/** Успешный ответ paste/generate: `{ ok, count }` — сколько draft-карточек создано. */
+@Serializable
+data class InsightsResultResponse(
+    val ok: Boolean = true,
+    val count: Int = 0,
+)
+
+/**
+ * Тело ошибки paste/generate (400 — парсинг/прекондишн, 502 — сбой анализа):
+ * `{ error, line? }`. `line` есть только у ошибок парсинга вставленного markdown.
+ */
+@Serializable
+data class InsightsErrorResponse(
+    val error: String? = null,
+    val line: Int? = null,
+)

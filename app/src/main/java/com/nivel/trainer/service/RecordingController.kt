@@ -3,6 +3,7 @@ package com.nivel.trainer.service
 import android.content.Context
 import android.content.Intent
 import androidx.core.content.ContextCompat
+import com.nivel.trainer.service.upload.AudioUploadScheduler
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -59,6 +60,7 @@ sealed interface RecordingState {
 @Singleton
 class RecordingController @Inject constructor(
     @ApplicationContext private val context: Context,
+    private val uploadScheduler: AudioUploadScheduler,
 ) {
     private val _state = MutableStateFlow<RecordingState>(RecordingState.Idle)
     val state: StateFlow<RecordingState> = _state.asStateFlow()
@@ -106,5 +108,11 @@ class RecordingController @Inject constructor(
     /** Обновление состояния — только из сервиса (он владеет записью). */
     internal fun update(state: RecordingState) {
         _state.value = state
+        // Хэндофф запись → конвейер (C3): как только запись завершена, ставим
+        // заливку в очередь WorkManager. uniqueWork+KEEP защищает от дублей, если
+        // экран записи (C2) тоже инициирует заливку по «Стоп».
+        if (state is RecordingState.Finished) {
+            uploadScheduler.enqueue(sessionId = state.sessionId, filePath = state.outputPath)
+        }
     }
 }

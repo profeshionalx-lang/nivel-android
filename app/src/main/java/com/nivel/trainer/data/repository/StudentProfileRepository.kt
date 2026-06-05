@@ -1,10 +1,15 @@
 package com.nivel.trainer.data.repository
 
 import com.nivel.trainer.BuildConfig
+import com.nivel.trainer.data.remote.AddMasterPlanItemRequest
+import com.nivel.trainer.data.remote.AddMasterPlanSectionRequest
+import com.nivel.trainer.data.remote.CreateGoalRequest
+import com.nivel.trainer.data.remote.CreateSessionForStudentRequest
 import com.nivel.trainer.data.remote.NivelApi
 import com.nivel.trainer.data.remote.UpdateStudentProfileRequest
 import com.nivel.trainer.data.toDomain
 import com.nivel.trainer.domain.InviteStatus
+import com.nivel.trainer.domain.Problem
 import com.nivel.trainer.domain.StudentInvite
 import com.nivel.trainer.domain.StudentProfile
 import kotlinx.coroutines.async
@@ -20,6 +25,8 @@ import javax.inject.Singleton
  * Точечный экран чтения, без Room-кэша: источник правды — сервер. `detail`,
  * `master-plan` и статус приглашения грузятся параллельно; план и приглашение —
  * best-effort (их сбой/отсутствие не роняют профиль).
+ *
+ * E2 (#25): здесь же справочник проблем и создание цели ученику.
  */
 interface StudentProfileRepository {
     suspend fun getProfile(studentId: String): Result<StudentProfile>
@@ -32,6 +39,58 @@ interface StudentProfileRepository {
 
     /** Отозвать приглашение (старая ссылка перестаёт работать). */
     suspend fun revokeInvite(studentId: String): Result<Unit>
+
+    suspend fun createSession(
+        studentId: String,
+        goalId: String,
+        scheduledAt: String?,
+        completedAt: String?,
+        trainerNotes: String?,
+        status: String?,
+    ): Result<String>
+
+    /** Справочник проблем для пикера при создании цели (E2). */
+    suspend fun getProblems(): Result<List<Problem>>
+
+    /**
+     * Создать цель ученику (E2): проблема из справочника и/или свободный текст.
+     * Хотя бы одно из значений должно быть задано (гейтит UI, как в вебе).
+     */
+    suspend fun createGoal(
+        studentId: String,
+        problemId: Int?,
+        customProblem: String?,
+    ): Result<Unit>
+
+    // --- E5 (#28): редактирование мастер-плана ---
+
+    /** Создать пустой мастер-план ученику. */
+    suspend fun createMasterPlan(studentId: String): Result<Unit>
+
+    /** Добавить секцию в план (category ∈ strength/technique/tactics/custom). */
+    suspend fun addMasterPlanSection(
+        studentId: String,
+        planId: String,
+        title: String,
+        category: String,
+        sortOrder: Int,
+    ): Result<Unit>
+
+    /** Удалить секцию (с пунктами каскадом). */
+    suspend fun deleteMasterPlanSection(studentId: String, sectionId: String): Result<Unit>
+
+    /** Добавить пункт в секцию. */
+    suspend fun addMasterPlanItem(
+        studentId: String,
+        sectionId: String,
+        title: String,
+        description: String?,
+        imageUrl: String?,
+        sortOrder: Int,
+    ): Result<Unit>
+
+    /** Удалить пункт мастер-плана. */
+    suspend fun deleteMasterPlanItem(studentId: String, itemId: String): Result<Unit>
 }
 
 @Singleton
@@ -78,4 +137,100 @@ class DefaultStudentProfileRepository @Inject constructor(
         api.revokeInvite(studentId)
         Unit
     }
+
+    override suspend fun createSession(
+        studentId: String,
+        goalId: String,
+        scheduledAt: String?,
+        completedAt: String?,
+        trainerNotes: String?,
+        status: String?,
+    ): Result<String> = runCatching {
+        api.createSessionForStudent(
+            CreateSessionForStudentRequest(
+                studentId = studentId,
+                goalId = goalId,
+                scheduledAt = scheduledAt,
+                completedAt = completedAt,
+                trainerNotes = trainerNotes?.takeIf { it.isNotBlank() },
+                status = status,
+            )
+        ).sessionId
+    }
+
+    override suspend fun getProblems(): Result<List<Problem>> = runCatching {
+        api.getReference().problems.map { it.toDomain() }
+    }
+
+    override suspend fun createGoal(
+        studentId: String,
+        problemId: Int?,
+        customProblem: String?,
+    ): Result<Unit> = runCatching {
+        api.createStudentGoal(
+            studentId = studentId,
+            body = CreateGoalRequest(
+                problemId = problemId,
+                customProblem = customProblem?.trim()?.takeIf { it.isNotEmpty() },
+            ),
+        )
+        Unit
+    }
+
+    override suspend fun createMasterPlan(studentId: String): Result<Unit> = runCatching {
+        api.createMasterPlan(studentId)
+        Unit
+    }
+
+    override suspend fun addMasterPlanSection(
+        studentId: String,
+        planId: String,
+        title: String,
+        category: String,
+        sortOrder: Int,
+    ): Result<Unit> = runCatching {
+        api.addMasterPlanSection(
+            studentId = studentId,
+            body = AddMasterPlanSectionRequest(
+                planId = planId,
+                title = title.trim(),
+                category = category,
+                sortOrder = sortOrder,
+            ),
+        )
+        Unit
+    }
+
+    override suspend fun deleteMasterPlanSection(studentId: String, sectionId: String): Result<Unit> =
+        runCatching {
+            api.deleteMasterPlanSection(studentId, sectionId)
+            Unit
+        }
+
+    override suspend fun addMasterPlanItem(
+        studentId: String,
+        sectionId: String,
+        title: String,
+        description: String?,
+        imageUrl: String?,
+        sortOrder: Int,
+    ): Result<Unit> = runCatching {
+        api.addMasterPlanItem(
+            studentId = studentId,
+            sectionId = sectionId,
+            body = AddMasterPlanItemRequest(
+                title = title.trim(),
+                description = description?.trim()?.takeIf { it.isNotEmpty() },
+                imageUrl = imageUrl?.trim()?.takeIf { it.isNotEmpty() },
+                sortOrder = sortOrder,
+            ),
+        )
+        Unit
+    }
+
+    override suspend fun deleteMasterPlanItem(studentId: String, itemId: String): Result<Unit> =
+        runCatching {
+            api.deleteMasterPlanItem(studentId, itemId)
+            Unit
+        }
 }

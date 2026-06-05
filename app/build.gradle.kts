@@ -132,6 +132,8 @@ dependencies {
 
     implementation(libs.androidx.navigation.compose)
 
+    implementation(libs.coil.compose)
+
     implementation(libs.hilt.android)
     ksp(libs.hilt.compiler)
     implementation(libs.androidx.hilt.navigation.compose)
@@ -148,4 +150,9 @@ dependencies {
     implementation(libs.androidx.room.runtime)
     implementation(libs.androidx.room.ktx)
     ksp(libs.androidx.room.compiler)
+
+    // C3 (#12) — фоновая заливка записи: WorkManager + Hilt-интеграция воркеров.
+    implementation(libs.androidx.work.runtime.ktx)
+    implementation(libs.androidx.hilt.work)
+    ksp(libs.androidx.hilt.compiler)
 }

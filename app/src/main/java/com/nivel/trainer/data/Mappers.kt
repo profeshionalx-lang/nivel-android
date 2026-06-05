@@ -4,28 +4,39 @@ import com.nivel.trainer.data.local.InsightCardEntity
 import com.nivel.trainer.data.local.SessionEntity
 import com.nivel.trainer.data.local.StudentEntity
 import com.nivel.trainer.data.remote.GoalDto
-import com.nivel.trainer.data.remote.InsightCardDto
 import com.nivel.trainer.data.remote.MasterPlanDto
 import com.nivel.trainer.data.remote.MasterPlanItemDto
 import com.nivel.trainer.data.remote.MasterPlanSectionDto
+import com.nivel.trainer.data.remote.ProblemDto
+import com.nivel.trainer.data.remote.SessionDetailResponse
 import com.nivel.trainer.data.remote.SessionDto
+import com.nivel.trainer.data.remote.SessionInsightCardDto
+import com.nivel.trainer.data.remote.SessionTranscriptStatusResponse
 import com.nivel.trainer.data.remote.ShadowStudentResponse
 import com.nivel.trainer.data.remote.StudentDetailResponse
 import com.nivel.trainer.data.remote.StudentDto
 import com.nivel.trainer.data.remote.StudentInviteResponse
 import com.nivel.trainer.data.remote.StudentSessionDto
+import com.nivel.trainer.data.remote.TranscriptResponse
+import com.nivel.trainer.data.remote.TranscriptSegmentDto
 import com.nivel.trainer.domain.Goal
 import com.nivel.trainer.domain.InsightCard
 import com.nivel.trainer.domain.InviteStatus
 import com.nivel.trainer.domain.MasterPlan
 import com.nivel.trainer.domain.MasterPlanItem
 import com.nivel.trainer.domain.MasterPlanSection
+import com.nivel.trainer.domain.Problem
+import com.nivel.trainer.domain.SessionAudioStatus
+import com.nivel.trainer.domain.SessionDetail
 import com.nivel.trainer.domain.ShadowStudent
 import com.nivel.trainer.domain.Student
 import com.nivel.trainer.domain.StudentInvite
 import com.nivel.trainer.domain.StudentProfile
 import com.nivel.trainer.domain.StudentSession
 import com.nivel.trainer.domain.TrainingSession
+import com.nivel.trainer.domain.Transcript
+import com.nivel.trainer.domain.TranscriptSegment
+import com.nivel.trainer.domain.TranscriptStatus
 
 /**
  * Мапперы DTO → Entity (запись в кэш) и Entity → domain (выдача в UI).
@@ -97,24 +108,8 @@ fun SessionEntity.toDomain() = TrainingSession(
 )
 
 // --- Insight cards ---
-
-fun InsightCardDto.toEntity() = InsightCardEntity(
-    id = id,
-    sessionId = sessionId,
-    studentId = studentId,
-    trainerId = trainerId,
-    title = title,
-    body = body,
-    quote = quote,
-    frontText = frontText,
-    contextText = contextText,
-    tags = tags?.takeIf { it.isNotEmpty() }?.joinToString(TAGS_SEPARATOR),
-    source = source,
-    trainerStatus = trainerStatus,
-    studentDecision = studentDecision,
-    position = position,
-    createdAt = createdAt,
-)
+// DTO->Entity маппер карточки — это [SessionInsightCardDto.toEntity] ниже (блок B6):
+// карточки приходят из `…/insight-cards` без session_id, поэтому он берётся из пути.
 
 fun InsightCardEntity.toDomain() = InsightCard(
     id = id,
@@ -142,6 +137,13 @@ fun GoalDto.toDomain() = Goal(
     customProblem = customProblem,
     status = status,
     createdAt = createdAt,
+)
+
+/** E2 (#25): проблема справочника → доменная модель для пикера при создании цели. */
+fun ProblemDto.toDomain() = Problem(
+    id = id,
+    categoryId = categoryId,
+    name = name,
 )
 
 fun StudentSessionDto.toDomain() = StudentSession(
@@ -172,6 +174,25 @@ fun MasterPlanSectionDto.toDomain() = MasterPlanSection(
 fun MasterPlanDto.toDomain() = MasterPlan(
     id = id,
     sections = sections.sortedBy { it.sortOrder }.map { it.toDomain() },
+)
+
+// --- D1 (#19): транскрипт (DTO → domain напрямую, без Room) ---
+
+fun TranscriptSegmentDto.toDomain() = TranscriptSegment(
+    id = id,
+    start = start,
+    end = end,
+    text = text,
+    avgLogprob = avgLogprob,
+)
+
+fun TranscriptResponse.toDomain() = Transcript(
+    status = TranscriptStatus.from(status),
+    errorMessage = errorMessage,
+    rawText = rawText,
+    // Сегменты упорядочены сервером по времени; сортируем по start для надёжности.
+    segments = segments.sortedBy { it.start }.map { it.toDomain() },
+    durationSeconds = durationSeconds,
 )
 
 /** Склейка detail + master-plan (+ приглашение, E3) в доменную модель профиля. */
@@ -206,3 +227,64 @@ fun StudentInviteResponse.toDomain(baseUrl: String): StudentInvite {
     val claimUrl = token?.takeIf { it.isNotBlank() }?.let { "${baseUrl.trimEnd('/')}/invite/$it" }
     return StudentInvite(status = mapped, claimUrl = claimUrl, claimedAt = claimedAt)
 }
+
+// --- B6 (#9): карточка тренировки (DTO → domain, без Room) ---
+
+fun SessionDetailResponse.toDomain() = SessionDetail(
+    id = id,
+    goalId = goalId,
+    sessionNumber = sessionNumber,
+    status = status,
+    trainerNotes = trainerNotes,
+    scheduledAt = scheduledAt,
+    completedAt = completedAt,
+)
+
+fun SessionTranscriptStatusResponse.toDomain() = SessionAudioStatus(
+    transcriptStatus = status,
+    transcriptError = errorMessage,
+    analysisStatus = analysisStatus,
+    analysisError = analysisError,
+)
+
+/**
+ * Карточка из эндпоинта `…/insight-cards` → доменный [InsightCard].
+ * `sessionId` приходит из пути запроса (DTO его не содержит); student/trainer id
+ * на этом экране не нужны (trainer-only просмотр своей сессии).
+ */
+fun SessionInsightCardDto.toDomain(sessionId: String) = InsightCard(
+    id = id,
+    sessionId = sessionId,
+    studentId = null,
+    trainerId = null,
+    title = title,
+    body = body,
+    quote = quote,
+    frontText = frontText,
+    contextText = contextText,
+    tags = tags ?: emptyList(),
+    source = source,
+    trainerStatus = trainerStatus,
+    studentDecision = studentDecision,
+    position = position,
+    createdAt = createdAt,
+)
+
+/** Тот же DTO → Room-entity для кэша карточек (B3). `sessionId` из пути. */
+fun SessionInsightCardDto.toEntity(sessionId: String) = InsightCardEntity(
+    id = id,
+    sessionId = sessionId,
+    studentId = null,
+    trainerId = null,
+    title = title,
+    body = body,
+    quote = quote,
+    frontText = frontText,
+    contextText = contextText,
+    tags = tags?.takeIf { it.isNotEmpty() }?.joinToString(TAGS_SEPARATOR),
+    source = source,
+    trainerStatus = trainerStatus,
+    studentDecision = studentDecision,
+    position = position,
+    createdAt = createdAt,
+)

@@ -1,6 +1,7 @@
 package com.nivel.trainer.data.remote
 
 import retrofit2.http.Body
+import retrofit2.http.PATCH
 import retrofit2.http.POST
 import retrofit2.http.Path
 
@@ -35,4 +36,30 @@ interface InsightsApi {
     suspend fun generateInsights(
         @Path("sessionId") sessionId: String,
     ): InsightsResultResponse
+
+    // --- D3 (#21): ревью draft-карточек (approve / reject / edit) ---
+
+    /**
+     * Одобрить draft-карточку (`POST /api/v1/cards/{id}/approve`, без тела).
+     * Распространяется на template-siblings. Trainer-only, проверка владения.
+     */
+    @POST("api/v1/cards/{cardId}/approve")
+    suspend fun approveCard(@Path("cardId") cardId: String): OkResponse
+
+    /**
+     * Отклонить draft-карточку (`POST /api/v1/cards/{id}/reject`, без тела).
+     * Trainer-only, проверка владения.
+     */
+    @POST("api/v1/cards/{cardId}/reject")
+    suspend fun rejectCard(@Path("cardId") cardId: String): OkResponse
+
+    /**
+     * Отредактировать контент карточки (`PATCH /api/v1/cards/{id}`,
+     * тело `{ title, body, tag, side? }`). Валидация полей → 400 `{ error }`.
+     */
+    @PATCH("api/v1/cards/{cardId}")
+    suspend fun updateCard(
+        @Path("cardId") cardId: String,
+        @Body body: UpdateCardRequest,
+    ): OkResponse
 }

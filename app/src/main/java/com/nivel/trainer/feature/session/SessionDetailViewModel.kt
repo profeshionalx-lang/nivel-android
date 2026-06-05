@@ -6,6 +6,9 @@ import com.nivel.trainer.data.repository.InsightsRepository
 import com.nivel.trainer.data.repository.InsightsResult
 import com.nivel.trainer.data.repository.SessionDetailRepository
 import com.nivel.trainer.domain.SessionOverview
+import com.nivel.trainer.service.upload.AudioUploadScheduler
+import com.nivel.trainer.service.upload.UploadStage
+import com.nivel.trainer.service.upload.UploadStatusObserver
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -41,6 +44,12 @@ data class SessionDetailUiState(
     val generating: Boolean = false,
     /** D2 — ошибка авто-генерации (показываем с кнопкой «Повторить анализ»). */
     val generateError: String? = null,
+    /**
+     * C5 — стадия фоновой заливки записи (запись→заливка%). Питается из WorkManager
+     * через [UploadStatusObserver]. Видима, пока на сервере ещё нет транскрипта
+     * (`overview.audio == null`); дальше пайплайн ведёт статус транскрипта (B6).
+     */
+    val uploadStage: UploadStage = UploadStage.None,
 )
 
 /**
@@ -56,6 +65,8 @@ data class SessionDetailUiState(
 class SessionDetailViewModel @Inject constructor(
     private val repository: SessionDetailRepository,
     private val insightsRepository: InsightsRepository,
+    private val uploadStatusObserver: UploadStatusObserver,
+    private val uploadScheduler: AudioUploadScheduler,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(SessionDetailUiState())
@@ -71,7 +82,28 @@ class SessionDetailViewModel @Inject constructor(
     fun load(sessionId: String) {
         if (this.sessionId == sessionId) return
         this.sessionId = sessionId
+        observeUpload(sessionId)
         refresh()
+    }
+
+    /**
+     * C5 — подписка на стадию заливки записи (WorkManager). Живёт пока жив ViewModel;
+     * UI показывает прогресс заливки до появления транскрипта на сервере.
+     */
+    private fun observeUpload(sessionId: String) {
+        viewModelScope.launch {
+            uploadStatusObserver.observe(sessionId).collect { stage ->
+                _uiState.update { it.copy(uploadStage = stage) }
+            }
+        }
+    }
+
+    /** C5 — ручной повтор заливки после провала (берёт file_path из стадии Failed). */
+    fun retryUpload() {
+        val id = sessionId ?: return
+        val stage = _uiState.value.uploadStage as? UploadStage.Failed ?: return
+        val filePath = stage.filePath ?: return
+        uploadScheduler.retry(id, filePath)
     }
 
     /** Тянет состояние сессии с сервера; ошибку показываем с возможностью повтора. */

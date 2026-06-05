@@ -208,6 +208,35 @@ data class MasterPlanItemDto(
     @SerialName("sort_order") val sortOrder: Int = 0,
 )
 
+// -----------------------------------------------------------------------------
+// E3 (#26) — управление учеником: правка профиля + статус приглашения.
+// Профиль: PATCH /api/v1/students/{id} (updateStudentProfileCore). Статус
+// приглашения сверен по web `getStudentInvite` (token/status/claimed_at).
+// -----------------------------------------------------------------------------
+
+/**
+ * Тело `PATCH /api/v1/students/{id}` — правка профиля ученика. Оба поля
+ * опциональны; пустую строку шлём как null (как `|| null` в вебе `updateStudentProfile`).
+ */
+@Serializable
+data class UpdateStudentProfileRequest(
+    @SerialName("full_name") val fullName: String? = null,
+    @SerialName("avatar_url") val avatarUrl: String? = null,
+)
+
+/**
+ * Статус приглашения ученика. Шейп по web `getStudentInvite`:
+ * `{ token, status: none|pending|claimed|revoked, claimed_at }`.
+ * TODO(#Фундамент): GET статуса в `/api/v1` ещё нет — контракт по web-экшену;
+ * до появления эндпоинта вызов вернёт 404 и трактуется как «статус неизвестен».
+ */
+@Serializable
+data class StudentInviteResponse(
+    val token: String? = null,
+    val status: String = "none",
+    @SerialName("claimed_at") val claimedAt: String? = null,
+)
+
 // E1 (#24) — создание тренировки без упражнений (POST /api/v1/sessions/for-student).
 @Serializable
 data class CreateSessionForStudentRequest(

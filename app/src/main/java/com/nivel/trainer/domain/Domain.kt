@@ -109,6 +109,8 @@ data class StudentProfile(
     val sessions: List<StudentSession>,
     /** Мастер-план ученика; null — плана ещё нет. */
     val masterPlan: MasterPlan?,
+    /** Приглашение ученика (E3); null — статус ещё не загружен. */
+    val invite: StudentInvite? = null,
 )
 
 /** Мастер-план ученика: упорядоченные секции с пунктами. */
@@ -129,6 +131,21 @@ data class MasterPlanItem(
     val title: String,
     val description: String?,
     val imageUrl: String?,
+)
+
+// --- E3 (#26): управление учеником — приглашение ---
+
+/** Статус приглашения ученика (как в вебе). `UNKNOWN` — статус ещё не загружен. */
+enum class InviteStatus { NONE, PENDING, CLAIMED, REVOKED, UNKNOWN }
+
+/**
+ * Состояние приглашения ученика: статус, claim-ссылка (для pending) и время
+ * принятия (для claimed). Тренер делится ссылкой, перевыпускает или отзывает её.
+ */
+data class StudentInvite(
+    val status: InviteStatus,
+    val claimUrl: String?,
+    val claimedAt: String?,
 )
 
 // --- B6 (#9): карточка тренировки (просмотр) ---

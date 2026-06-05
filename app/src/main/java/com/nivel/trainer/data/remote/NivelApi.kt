@@ -3,6 +3,7 @@ package com.nivel.trainer.data.remote
 import retrofit2.http.Body
 import retrofit2.http.DELETE
 import retrofit2.http.GET
+import retrofit2.http.PATCH
 import retrofit2.http.POST
 import retrofit2.http.Path
 import retrofit2.http.Query
@@ -89,6 +90,30 @@ interface NivelApi {
      */
     @GET("api/v1/students/{studentId}/master-plan")
     suspend fun getStudentMasterPlan(@Path("studentId") studentId: String): MasterPlanResponse
+
+    // ---------------------------------------------------------------------------
+    // E3 (#26) — управление учеником: правка профиля + статус приглашения.
+    // regenerate/revoke объявлены выше (B4). Здесь — PATCH профиля и GET статуса.
+    // ---------------------------------------------------------------------------
+
+    /**
+     * Правка профиля ученика (`PATCH /api/v1/students/{id}`), тело `{ full_name, avatar_url }`.
+     * Trainer-only; тренер должен владеть учеником. Ответ `{ ok }`.
+     */
+    @PATCH("api/v1/students/{studentId}")
+    suspend fun updateStudentProfile(
+        @Path("studentId") studentId: String,
+        @Body body: UpdateStudentProfileRequest,
+    ): OkResponse
+
+    /**
+     * Статус приглашения ученика (`GET /api/v1/students/{id}/invite`).
+     * TODO(#Фундамент): GET-эндпоинта статуса в `/api/v1` пока НЕТ — путь/шейп заданы
+     * по web `getStudentInvite`; до появления эндпоинта вызов вернёт 404, репозиторий
+     * трактует это как «статус неизвестен» (best-effort, экран не падает).
+     */
+    @GET("api/v1/students/{studentId}/invite")
+    suspend fun getStudentInvite(@Path("studentId") studentId: String): StudentInviteResponse
 
     // E1 (#24) — создать тренировку (Вариант А: без упражнений, POST /api/v1/sessions/for-student).
     @POST("api/v1/sessions/for-student")

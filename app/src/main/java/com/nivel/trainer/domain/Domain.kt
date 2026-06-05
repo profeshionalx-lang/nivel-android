@@ -74,6 +74,18 @@ data class Goal(
 )
 
 /**
+ * Проблема из справочника (E2, #25). Используется при создании цели: тренер
+ * может привязать цель к проблеме из списка вместо/вместе со свободным текстом.
+ * Локализованное имя приходит с сервера (`?lang`). [categoryId] — для возможной
+ * группировки; веб показывает плоский список, отсортированный по `sort_order`.
+ */
+data class Problem(
+    val id: Int,
+    val categoryId: Int,
+    val name: String,
+)
+
+/**
  * Сессия в карточке профиля ученика. Легче [TrainingSession]: контракт
  * `/students/{id}` отдаёт только id/номер/статус/даты, `sessionNumber` nullable.
  */
@@ -117,4 +129,83 @@ data class MasterPlanItem(
     val title: String,
     val description: String?,
     val imageUrl: String?,
+)
+
+// --- B6 (#9): карточка тренировки (просмотр) ---
+
+/**
+ * Детали сессии для экрана карточки тренировки. Упражнения в модель не тянем —
+ * на экране сессии они не показываются (решение по #9, как веб-страница сессии).
+ * `sessionNumber` nullable (контракт `getSessionDetailCore`).
+ */
+data class SessionDetail(
+    val id: String,
+    val goalId: String?,
+    val sessionNumber: Int?,
+    val status: String,
+    val trainerNotes: String?,
+    val scheduledAt: String?,
+    val completedAt: String?,
+)
+
+/**
+ * Статус обработки аудио сессии: транскрипция + анализ карточек.
+ * На экране `null` означает «записи ещё нет» (эндпоинт статуса отдал 404).
+ */
+data class SessionAudioStatus(
+    /** processing | ready | failed (статус транскрипции). */
+    val transcriptStatus: String,
+    val transcriptError: String?,
+    /** idle | processing | ready | failed (статус AI-анализа). */
+    val analysisStatus: String,
+    val analysisError: String?,
+)
+
+/**
+ * Полное состояние экрана карточки тренировки (B6): детали + статус аудио +
+ * инсайт-карточки сессии. Карточки — переиспользуем доменный [InsightCard].
+ */
+data class SessionOverview(
+    val detail: SessionDetail,
+    val audio: SessionAudioStatus?,
+    val cards: List<InsightCard>,
+)
+
+// --- D1 (#19): транскрипт тренировки (просмотр, выгрузка) ---
+
+/** Статус обработки транскрипта (значения сервера из transcribeSessionCore). */
+enum class TranscriptStatus {
+    PROCESSING,
+    READY,
+    FAILED;
+
+    companion object {
+        /** Парсит строку статуса с сервера; неизвестное трактуем как FAILED. */
+        fun from(raw: String?): TranscriptStatus = when (raw?.lowercase()) {
+            "processing" -> PROCESSING
+            "ready" -> READY
+            else -> FAILED
+        }
+    }
+}
+
+/**
+ * Транскрипт тренировочной сессии: статус + сырой текст + сегменты с таймкодами.
+ * Источник правды — сервер; экран точечный, без Room-кэша (как профиль ученика).
+ */
+data class Transcript(
+    val status: TranscriptStatus,
+    val errorMessage: String?,
+    val rawText: String?,
+    val segments: List<TranscriptSegment>,
+    val durationSeconds: Int?,
+)
+
+/** Сегмент транскрипта: таймкоды (сек), текст и оценка уверенности avg_logprob. */
+data class TranscriptSegment(
+    val id: Int,
+    val start: Double,
+    val end: Double,
+    val text: String,
+    val avgLogprob: Double?,
 )

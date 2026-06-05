@@ -3,6 +3,7 @@ package com.nivel.trainer.data.repository
 import com.nivel.trainer.data.remote.InsightsApi
 import com.nivel.trainer.data.remote.InsightsErrorResponse
 import com.nivel.trainer.data.remote.PasteInsightsRequest
+import com.nivel.trainer.data.remote.UpdateCardRequest
 import kotlinx.serialization.json.Json
 import retrofit2.HttpException
 import javax.inject.Inject
@@ -22,6 +23,17 @@ sealed interface InsightsResult {
 }
 
 /**
+ * Результат действия ревью карточки (D3): одобрить/отклонить/редактировать.
+ * Без полезной нагрузки — экран после успеха перечитывает карточки с сервера.
+ */
+sealed interface CardActionResult {
+    data object Success : CardActionResult
+
+    /** Понятная ошибка (400 `{ error }` — например, провал валидации правки). */
+    data class Failure(val message: String) : CardActionResult
+}
+
+/**
  * Репозиторий создания инсайтов (D2, #20): ручная вставка markdown от Claude и
  * авто-генерация из готового транскрипта. Без Room — это точечная запись, источник
  * правды сервер; карточки экран перечитывает через [SessionDetailRepository].
@@ -35,6 +47,21 @@ interface InsightsRepository {
 
     /** Авто-генерация из транскрипта (LLM инлайн, может занять минуты). */
     suspend fun generateInsights(sessionId: String): InsightsResult
+
+    /** Одобрить draft-карточку (D3). */
+    suspend fun approveCard(cardId: String): CardActionResult
+
+    /** Отклонить draft-карточку (D3). */
+    suspend fun rejectCard(cardId: String): CardActionResult
+
+    /** Отредактировать карточку (title/body/tag/side). Валидация — на сервере (D3). */
+    suspend fun updateCard(
+        cardId: String,
+        title: String,
+        body: String,
+        tag: String,
+        side: String?,
+    ): CardActionResult
 }
 
 @Singleton
@@ -55,6 +82,33 @@ class DefaultInsightsRepository @Inject constructor(
             .fold(
                 onSuccess = { InsightsResult.Success(it.count) },
                 onFailure = { InsightsResult.Failure(messageFor(it, parseError = false)) },
+            )
+
+    override suspend fun approveCard(cardId: String): CardActionResult =
+        runCatching { api.approveCard(cardId) }
+            .fold(
+                onSuccess = { CardActionResult.Success },
+                onFailure = { CardActionResult.Failure(messageFor(it, parseError = false)) },
+            )
+
+    override suspend fun rejectCard(cardId: String): CardActionResult =
+        runCatching { api.rejectCard(cardId) }
+            .fold(
+                onSuccess = { CardActionResult.Success },
+                onFailure = { CardActionResult.Failure(messageFor(it, parseError = false)) },
+            )
+
+    override suspend fun updateCard(
+        cardId: String,
+        title: String,
+        body: String,
+        tag: String,
+        side: String?,
+    ): CardActionResult =
+        runCatching { api.updateCard(cardId, UpdateCardRequest(title, body, tag, side)) }
+            .fold(
+                onSuccess = { CardActionResult.Success },
+                onFailure = { CardActionResult.Failure(messageFor(it, parseError = false)) },
             )
 
     /**

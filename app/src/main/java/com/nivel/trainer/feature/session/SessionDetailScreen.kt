@@ -1,7 +1,11 @@
 package com.nivel.trainer.feature.session
 
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -11,6 +15,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
@@ -19,6 +24,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -36,13 +42,19 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
@@ -59,6 +71,9 @@ import com.nivel.trainer.domain.SessionDetail
 import com.nivel.trainer.domain.SessionOverview
 import com.nivel.trainer.ui.theme.NivelTheme
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlin.math.abs
+import kotlin.math.min
 import java.time.OffsetDateTime
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
@@ -122,8 +137,13 @@ fun SessionDetailScreen(
         overview = state.overview,
         generating = state.generating,
         generateError = state.generateError,
+        cardActionError = state.cardActionError,
         onGenerate = viewModel::generateInsights,
         onOpenPaste = viewModel::openPasteSheet,
+        onApproveCard = viewModel::approveCard,
+        onRejectCard = viewModel::rejectCard,
+        onEditCard = viewModel::openEditSheet,
+        onDismissCardError = viewModel::dismissCardActionError,
         onBack = onBack,
         onRetry = viewModel::refresh,
         modifier = modifier,
@@ -136,6 +156,19 @@ fun SessionDetailScreen(
             onMarkdownChange = viewModel::onPasteMarkdownChange,
             onSubmit = viewModel::submitPaste,
             onDismiss = viewModel::closePasteSheet,
+        )
+    }
+
+    val editSheet = state.editSheet
+    if (editSheet is EditSheetState.Open) {
+        EditCardSheet(
+            state = editSheet,
+            onTitleChange = viewModel::onEditTitleChange,
+            onBodyChange = viewModel::onEditBodyChange,
+            onTagChange = viewModel::onEditTagChange,
+            onSideChange = viewModel::onEditSideChange,
+            onSave = viewModel::submitEdit,
+            onDismiss = viewModel::closeEditSheet,
         )
     }
 }
@@ -153,8 +186,13 @@ private fun SessionDetailContent(
     modifier: Modifier = Modifier,
     generating: Boolean = false,
     generateError: String? = null,
+    cardActionError: String? = null,
     onGenerate: () -> Unit = {},
     onOpenPaste: () -> Unit = {},
+    onApproveCard: (String) -> Unit = {},
+    onRejectCard: (String) -> Unit = {},
+    onEditCard: (InsightCard) -> Unit = {},
+    onDismissCardError: () -> Unit = {},
 ) {
     Column(
         modifier = modifier
@@ -172,8 +210,13 @@ private fun SessionDetailContent(
                 overview = overview,
                 generating = generating,
                 generateError = generateError,
+                cardActionError = cardActionError,
                 onGenerate = onGenerate,
                 onOpenPaste = onOpenPaste,
+                onApproveCard = onApproveCard,
+                onRejectCard = onRejectCard,
+                onEditCard = onEditCard,
+                onDismissCardError = onDismissCardError,
             )
 
             else -> CenterBox { EmptyState() }
@@ -214,8 +257,13 @@ private fun SessionBody(
     overview: SessionOverview,
     generating: Boolean,
     generateError: String?,
+    cardActionError: String?,
     onGenerate: () -> Unit,
     onOpenPaste: () -> Unit,
+    onApproveCard: (String) -> Unit,
+    onRejectCard: (String) -> Unit,
+    onEditCard: (InsightCard) -> Unit,
+    onDismissCardError: () -> Unit,
 ) {
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -230,8 +278,13 @@ private fun SessionBody(
                 cards = overview.cards,
                 generating = generating,
                 generateError = generateError,
+                cardActionError = cardActionError,
                 onGenerate = onGenerate,
                 onOpenPaste = onOpenPaste,
+                onApproveCard = onApproveCard,
+                onRejectCard = onRejectCard,
+                onEditCard = onEditCard,
+                onDismissCardError = onDismissCardError,
             )
         }
     }
@@ -297,8 +350,13 @@ private fun CardsSection(
     cards: List<InsightCard>,
     generating: Boolean,
     generateError: String?,
+    cardActionError: String?,
     onGenerate: () -> Unit,
     onOpenPaste: () -> Unit,
+    onApproveCard: (String) -> Unit,
+    onRejectCard: (String) -> Unit,
+    onEditCard: (InsightCard) -> Unit,
+    onDismissCardError: () -> Unit,
 ) {
     val drafts = cards.filter { it.trainerStatus == "draft" }
     val approved = cards.filter { it.trainerStatus == "approved" }
@@ -320,6 +378,10 @@ private fun CardsSection(
         // Вставить инсайты от Claude — доступно тренеру всегда (как PasteInsightsButton).
         PasteInsightButton(onClick = onOpenPaste)
 
+        // Ошибка действия approve/reject — баннер, тап скрывает (как router.refresh в вебе).
+        cardActionError?.let { err -> CardActionErrorBanner(err, onDismissCardError) }
+
+        // Черновики — тренерское ревью (swipe-стек + кнопки + edit), как DraftCardsList в вебе.
         if (drafts.isNotEmpty()) {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(
@@ -329,7 +391,12 @@ private fun CardsSection(
                     fontWeight = FontWeight.Black,
                     letterSpacing = 2.sp,
                 )
-                drafts.forEach { CardView(it) }
+                DraftReview(
+                    drafts = drafts,
+                    onApprove = onApproveCard,
+                    onReject = onRejectCard,
+                    onEditCard = onEditCard,
+                )
             }
         }
 
@@ -356,7 +423,10 @@ private fun CardsSection(
     }
 }
 
-/** Карточка инсайта read-only: заголовок + тело + теги. Действия — задачи D2–D4. */
+/**
+ * Карточка инсайта read-only: заголовок + тело + теги. Используется для approved-карточек
+ * (черновики ревьюятся через [DraftReview] — D3; reorder approved — задача D4).
+ */
 @Composable
 private fun CardView(card: InsightCard) {
     Column(
@@ -396,6 +466,317 @@ private fun CardView(card: InsightCard) {
             }
         }
     }
+}
+
+// --- D3 (#21): ревью draft-карточек (swipe-стек + кнопки + edit) ---
+
+/** Порог свайпа для принятия/отклонения (как `SWIPE_THRESHOLD = 110` в вебе). */
+private val SwipeThreshold = 110.dp
+
+/**
+ * Тренерское ревью черновиков (порт `DraftCardsList`): tinder-стек — верхняя карта
+ * перетаскивается по горизонтали (вправо = принять, влево = отклонить), за ней видна
+ * следующая. Под стеком — три кнопки (отклонить / редактировать / принять) и счётчик
+ * «Осталось: N». Локальная очередь синкается с приходящими [drafts] (как `useEffect`
+ * в вебе) — после действия экран перечитывает карточки и очередь обновляется.
+ */
+@Composable
+private fun DraftReview(
+    drafts: List<InsightCard>,
+    onApprove: (String) -> Unit,
+    onReject: (String) -> Unit,
+    onEditCard: (InsightCard) -> Unit,
+) {
+    val scope = rememberCoroutineScope()
+    val offsetX = remember { Animatable(0f) }
+    var queue by remember { mutableStateOf(drafts) }
+    var exiting by remember { mutableStateOf(false) }
+
+    // Синк очереди с сервером (как `setQueue(cards)` в useEffect). Сбрасываем сдвиг.
+    LaunchedEffect(drafts) {
+        queue = drafts
+        offsetX.snapTo(0f)
+        exiting = false
+    }
+
+    val top = queue.firstOrNull()
+    val next = queue.getOrNull(1)
+
+    if (top == null) {
+        DraftsDoneCard()
+        return
+    }
+
+    val thresholdPx = with(LocalDensity.current) { SwipeThreshold.toPx() }
+
+    fun commit(approve: Boolean) {
+        if (exiting) return
+        val card = queue.firstOrNull() ?: return
+        exiting = true
+        scope.launch {
+            offsetX.animateTo(if (approve) 1400f else -1400f, tween(280))
+            queue = queue.drop(1)
+            offsetX.snapTo(0f)
+            exiting = false
+            if (approve) onApprove(card.id) else onReject(card.id)
+        }
+    }
+
+    Column(verticalArrangement = Arrangement.spacedBy(20.dp)) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(320.dp),
+        ) {
+            if (next != null) DraftCardFace(card = next, stacked = true)
+
+            val dx = offsetX.value
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .graphicsLayer {
+                        translationX = dx
+                        rotationZ = dx / 18f
+                        alpha = if (exiting) 0f else 1f - min(abs(dx) / 400f, 0.4f)
+                    }
+                    .pointerInput(top.id) {
+                        detectHorizontalDragGestures(
+                            onDragEnd = {
+                                when {
+                                    offsetX.value > thresholdPx -> commit(approve = true)
+                                    offsetX.value < -thresholdPx -> commit(approve = false)
+                                    else -> scope.launch { offsetX.animateTo(0f, spring()) }
+                                }
+                            },
+                            onHorizontalDrag = { _, dragAmount ->
+                                if (!exiting) scope.launch { offsetX.snapTo(offsetX.value + dragAmount) }
+                            },
+                        )
+                    },
+            ) {
+                DraftCardFace(card = top, dx = dx)
+            }
+        }
+
+        // Три кнопки: отклонить (✕) / редактировать (✎) / принять (✓) — как в вебе.
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterHorizontally),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            ReviewActionButton(
+                glyph = "✕",
+                contentDescription = "Отклонить",
+                size = 64.dp,
+                glyphColor = ErrorColor,
+                container = Color(0xFFF4F4F4),
+                onClick = { commit(approve = false) },
+            )
+            ReviewActionButton(
+                glyph = "✎",
+                contentDescription = "Редактировать",
+                size = 64.dp,
+                glyphColor = Color(0xFF3F3F3F),
+                container = Color(0xFFF4F4F4),
+                onClick = { onEditCard(top) },
+            )
+            ReviewActionButton(
+                glyph = "✓",
+                contentDescription = "Принять",
+                size = 80.dp,
+                glyphColor = OnPrimary,
+                container = Primary,
+                onClick = { commit(approve = true) },
+            )
+        }
+
+        Text(
+            text = "Осталось: ${queue.size}",
+            color = OnSurfaceVariant,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Bold,
+            letterSpacing = 2.sp,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth(),
+        )
+    }
+}
+
+/** Пустое состояние ревью — «Все черновики разобраны» (как в вебе после очистки очереди). */
+@Composable
+private fun DraftsDoneCard() {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(SurfaceCard, RoundedCornerShape(16.dp))
+            .padding(24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text("✓", color = Primary, fontSize = 28.sp, fontWeight = FontWeight.Black)
+        Text(
+            text = "Все черновики разобраны",
+            color = OnSurface,
+            fontSize = 14.sp,
+            fontWeight = FontWeight.Bold,
+        )
+        Text(
+            text = "Одобренные карточки уже видны ученику.",
+            color = OnSurfaceVariant,
+            fontSize = 12.sp,
+            textAlign = TextAlign.Center,
+        )
+    }
+}
+
+/**
+ * Лицо draft-карточки в стеке (порт `DraftCardFace`): светлая карта с меткой «AI
+ * черновик», темой, заголовком, телом и цитатой. При перетаскивании ([dx]) сверху
+ * проступают подсказки «Принять»/«Отклонить». [stacked] — следующая карта позади.
+ */
+@Composable
+private fun DraftCardFace(card: InsightCard, stacked: Boolean = false, dx: Float = 0f) {
+    val title = card.title?.takeIf { it.isNotBlank() } ?: card.frontText.orEmpty()
+    val body = card.body?.takeIf { it.isNotBlank() } ?: card.contextText.orEmpty()
+    val tag = card.tags.firstOrNull()
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .then(
+                if (stacked) Modifier.graphicsLayer {
+                    scaleX = 0.94f
+                    scaleY = 0.94f
+                    translationY = -12f
+                    alpha = 0.6f
+                } else Modifier,
+            )
+            .background(Color(0xFFFFFFFF), RoundedCornerShape(24.dp))
+            .padding(24.dp),
+    ) {
+        if (!stacked) {
+            // Подсказка «Принять» (слева, зелёная) при свайпе вправо.
+            SwipeHint(
+                text = "Принять",
+                container = Color(0xFF22C55E),
+                alignment = Alignment.TopStart,
+                alpha = (dx / 80f).coerceIn(0f, 1f),
+            )
+            // Подсказка «Отклонить» (справа, красная) при свайпе влево.
+            SwipeHint(
+                text = "Отклонить",
+                container = Color(0xFFEF4444),
+                alignment = Alignment.TopEnd,
+                alpha = (-dx / 80f).coerceIn(0f, 1f),
+            )
+        }
+
+        Column(modifier = Modifier.fillMaxSize()) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text(
+                    text = "AI черновик",
+                    color = Color(0xFFB45309),
+                    fontSize = 9.sp,
+                    fontWeight = FontWeight.Black,
+                    letterSpacing = 1.sp,
+                    modifier = Modifier
+                        .background(Color(0x33F59E0B), RoundedCornerShape(999.dp))
+                        .padding(horizontal = 8.dp, vertical = 2.dp),
+                )
+                tag?.let {
+                    Text(
+                        text = it,
+                        color = Color(0xFF6B7280),
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 1.sp,
+                    )
+                }
+            }
+            Spacer(Modifier.height(12.dp))
+            Text(
+                text = title,
+                color = Color(0xFF111827),
+                fontSize = 22.sp,
+                fontWeight = FontWeight.Black,
+            )
+            Spacer(Modifier.weight(1f))
+            if (body.isNotBlank()) {
+                Text(text = body, color = Color(0xFF374151), fontSize = 14.sp)
+            }
+            card.quote?.takeIf { it.isNotBlank() }?.let { quote ->
+                Spacer(Modifier.height(12.dp))
+                Text(
+                    text = "«$quote»",
+                    color = Color(0xFF6B7280),
+                    fontSize = 12.sp,
+                    fontStyle = FontStyle.Italic,
+                    modifier = Modifier
+                        .background(Color(0x14F59E0B), RoundedCornerShape(8.dp))
+                        .padding(start = 8.dp, top = 4.dp, bottom = 4.dp, end = 8.dp),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun SwipeHint(text: String, container: Color, alignment: Alignment, alpha: Float) {
+    if (alpha <= 0f) return
+    Box(modifier = Modifier.fillMaxSize()) {
+        Text(
+            text = text,
+            color = Color.White,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Black,
+            letterSpacing = 1.sp,
+            modifier = Modifier
+                .align(alignment)
+                .graphicsLayer { this.alpha = alpha }
+                .background(container, RoundedCornerShape(999.dp))
+                .padding(horizontal = 12.dp, vertical = 4.dp),
+        )
+    }
+}
+
+/** Круглая кнопка действия ревью (отклонить/редактировать/принять). */
+@Composable
+private fun ReviewActionButton(
+    glyph: String,
+    contentDescription: String,
+    size: androidx.compose.ui.unit.Dp,
+    glyphColor: Color,
+    container: Color,
+    onClick: () -> Unit,
+) {
+    Box(
+        modifier = Modifier
+            .size(size)
+            .background(container, CircleShape)
+            .clickable(onClick = onClick)
+            .semantics { this.contentDescription = contentDescription },
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(text = glyph, color = glyphColor, fontSize = (size.value * 0.42f).sp, fontWeight = FontWeight.Black)
+    }
+}
+
+/** Баннер ошибки действия approve/reject. Тап скрывает (после refresh данные верны). */
+@Composable
+private fun CardActionErrorBanner(message: String, onDismiss: () -> Unit) {
+    Text(
+        text = message,
+        color = ErrorColor,
+        fontSize = 12.sp,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onDismiss)
+            .background(ErrorColor.copy(alpha = 0.1f), RoundedCornerShape(12.dp))
+            .padding(12.dp),
+    )
 }
 
 // --- D2 (#20): статус авто-анализа и вставка инсайтов ---
@@ -732,6 +1113,210 @@ private fun PasteInsightsSheet(
                 ) {
                     Text("Закрыть", color = OnSurface, fontWeight = FontWeight.Bold)
                 }
+            }
+        }
+    }
+}
+
+/**
+ * Шит правки карточки (D3, порт `EditAiCardModal`): заголовок (≤80) и описание
+ * (≤400) со счётчиками, выбор темы и стороны, цитата read-only, ошибка, кнопки
+ * «Сохранить»/«Закрыть». «Сохранить» активна только при валидных полях. Mobile-first.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun EditCardSheet(
+    state: EditSheetState.Open,
+    onTitleChange: (String) -> Unit,
+    onBodyChange: (String) -> Unit,
+    onTagChange: (String) -> Unit,
+    onSideChange: (String) -> Unit,
+    onSave: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val focusRequester = remember { FocusRequester() }
+    LaunchedEffect(Unit) { runCatching { focusRequester.requestFocus() } }
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = SurfaceCard,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .widthIn(max = 430.dp)
+                .padding(horizontal = 24.dp)
+                .padding(bottom = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Text(
+                    text = "Редактировать карточку",
+                    color = OnSurface,
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Black,
+                    modifier = Modifier.weight(1f),
+                )
+                IconButton(onClick = onDismiss, modifier = Modifier.size(TouchTarget)) {
+                    Text("✕", color = OnSurfaceVariant, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+
+            FieldLabel("Заголовок (${state.title.trim().length}/80)")
+            OutlinedTextField(
+                value = state.title,
+                onValueChange = { if (it.length <= 80) onTitleChange(it) },
+                singleLine = true,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .focusRequester(focusRequester),
+                shape = RoundedCornerShape(12.dp),
+                colors = editFieldColors(),
+            )
+
+            FieldLabel("Описание (${state.body.trim().length}/400)")
+            OutlinedTextField(
+                value = state.body,
+                onValueChange = { if (it.length <= 400) onBodyChange(it) },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 120.dp),
+                shape = RoundedCornerShape(12.dp),
+                colors = editFieldColors(),
+            )
+
+            FieldLabel("Тема")
+            ChipGrid(options = CARD_TAGS, selected = state.tag, onSelect = onTagChange)
+
+            FieldLabel("Сторона")
+            ChipGrid(options = CARD_SIDES, selected = state.side, onSelect = onSideChange)
+
+            state.quote?.let { quote ->
+                FieldLabel("Цитата (не редактируется)")
+                Text(
+                    text = "«$quote»",
+                    color = OnSurfaceVariant,
+                    fontSize = 12.sp,
+                    fontStyle = FontStyle.Italic,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(SurfaceElevated, RoundedCornerShape(12.dp))
+                        .padding(12.dp),
+                )
+            }
+
+            state.error?.let { err ->
+                Text(
+                    text = err,
+                    color = ErrorColor,
+                    fontSize = 12.sp,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(ErrorColor.copy(alpha = 0.1f), RoundedCornerShape(12.dp))
+                        .padding(12.dp),
+                )
+            }
+
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(
+                    onClick = onSave,
+                    enabled = !state.submitting && state.isValid,
+                    modifier = Modifier
+                        .weight(1f)
+                        .heightIn(min = TouchTarget),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Primary,
+                        contentColor = OnPrimary,
+                        disabledContainerColor = Primary.copy(alpha = 0.4f),
+                        disabledContentColor = OnPrimary,
+                    ),
+                ) {
+                    Text(
+                        text = if (state.submitting) "Сохраняем…" else "Сохранить",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 14.sp,
+                    )
+                }
+                TextButton(
+                    onClick = onDismiss,
+                    enabled = !state.submitting,
+                    modifier = Modifier
+                        .weight(1f)
+                        .heightIn(min = TouchTarget),
+                    shape = RoundedCornerShape(12.dp),
+                ) {
+                    Text("Закрыть", color = OnSurface, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+    }
+}
+
+/** Подпись поля в шите правки (как `<label>` uppercase в вебе). */
+@Composable
+private fun FieldLabel(text: String) {
+    Text(
+        text = text,
+        color = OnSurfaceVariant,
+        fontSize = 10.sp,
+        fontWeight = FontWeight.Black,
+        letterSpacing = 2.sp,
+    )
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun editFieldColors() = OutlinedTextFieldDefaults.colors(
+    focusedTextColor = OnSurface,
+    unfocusedTextColor = OnSurface,
+    focusedContainerColor = SurfaceElevated,
+    unfocusedContainerColor = SurfaceElevated,
+    focusedBorderColor = Primary,
+    unfocusedBorderColor = BorderDim,
+    cursorColor = Primary,
+)
+
+/**
+ * Сетка выбираемых чипов в 2 колонки — нативный пикер темы/стороны (веб использует
+ * `<select>`/grid-cols-2). Выбранный чип подсвечен лаймом.
+ */
+@Composable
+private fun ChipGrid(options: List<String>, selected: String, onSelect: (String) -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        options.chunked(2).forEach { rowOptions ->
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                rowOptions.forEach { option ->
+                    val isSelected = option == selected
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .heightIn(min = TouchTarget)
+                            .background(
+                                if (isSelected) Primary else SurfaceElevated,
+                                RoundedCornerShape(12.dp),
+                            )
+                            .clickable { onSelect(option) }
+                            .padding(vertical = 12.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            text = option,
+                            color = if (isSelected) OnPrimary else OnSurfaceVariant,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Black,
+                            letterSpacing = 1.sp,
+                        )
+                    }
+                }
+                // Доп. ячейка-распорка, если в ряду один элемент (нечётное число опций).
+                if (rowOptions.size == 1) Spacer(Modifier.weight(1f))
             }
         }
     }

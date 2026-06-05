@@ -299,3 +299,23 @@ data class InsightsErrorResponse(
     val error: String? = null,
     val line: Int? = null,
 )
+
+// -----------------------------------------------------------------------------
+// D3 (#21) — ревью draft-карточек: одобрить / отклонить / редактировать (write A5).
+// Контракт сверен по route-файлам NIVEL: cards/[id]/approve, cards/[id]/reject,
+// cards/[id] PATCH (core: setAiCardTrainerStatusCore, updateAiInsightCardCore).
+// approve/reject — без тела; ответ всех трёх — { ok } (см. OkResponse выше).
+// -----------------------------------------------------------------------------
+
+/**
+ * Тело PATCH /api/v1/cards/{id} — правка контента карточки. `side` опционально
+ * (защита/атака). Валидация на сервере: title непустой ≤80, body непустой ≤400,
+ * tag из набора тем, side из набора сторон (ошибка → 400 { error }).
+ */
+@Serializable
+data class UpdateCardRequest(
+    val title: String,
+    val body: String,
+    val tag: String,
+    val side: String? = null,
+)

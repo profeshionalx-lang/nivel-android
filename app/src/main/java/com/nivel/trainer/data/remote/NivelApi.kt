@@ -83,4 +83,20 @@ interface NivelApi {
      */
     @GET("api/v1/students/{studentId}/master-plan")
     suspend fun getStudentMasterPlan(@Path("studentId") studentId: String): MasterPlanResponse
+
+    // ---------------------------------------------------------------------------
+    // D1 (#19) — транскрипт тренировки (просмотр, выгрузка), read A4.
+    // ---------------------------------------------------------------------------
+
+    /**
+     * Транскрипт сессии (`GET /api/v1/sessions/{id}/transcript`): статус обработки
+     * + сырой текст + сегменты. Trainer-only, ownership на сервере.
+     *
+     * TODO(#Фундамент): в репо NIVEL есть только `.../transcript/status` (без текста).
+     * Эндпоинт с raw_text/segments нужно добавить тем же шейпом, что веб читает из
+     * таблицы `transcripts` (см. [TranscriptResponse]). До его появления вызов
+     * вернёт 404 — экран покажет состояние ошибки, не падая.
+     */
+    @GET("api/v1/sessions/{sessionId}/transcript")
+    suspend fun getTranscript(@Path("sessionId") sessionId: String): TranscriptResponse
 }

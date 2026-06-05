@@ -1,5 +1,7 @@
 package com.nivel.trainer.data.repository
 
+import com.nivel.trainer.data.remote.AddMasterPlanItemRequest
+import com.nivel.trainer.data.remote.AddMasterPlanSectionRequest
 import com.nivel.trainer.data.remote.CreateGoalRequest
 import com.nivel.trainer.data.remote.NivelApi
 import com.nivel.trainer.data.toDomain
@@ -35,6 +37,36 @@ interface StudentProfileRepository {
         problemId: Int?,
         customProblem: String?,
     ): Result<Unit>
+
+    // --- E5 (#28): редактирование мастер-плана ---
+
+    /** Создать пустой мастер-план ученику. */
+    suspend fun createMasterPlan(studentId: String): Result<Unit>
+
+    /** Добавить секцию в план (category ∈ strength/technique/tactics/custom). */
+    suspend fun addMasterPlanSection(
+        studentId: String,
+        planId: String,
+        title: String,
+        category: String,
+        sortOrder: Int,
+    ): Result<Unit>
+
+    /** Удалить секцию (с пунктами каскадом). */
+    suspend fun deleteMasterPlanSection(studentId: String, sectionId: String): Result<Unit>
+
+    /** Добавить пункт в секцию. */
+    suspend fun addMasterPlanItem(
+        studentId: String,
+        sectionId: String,
+        title: String,
+        description: String?,
+        imageUrl: String?,
+        sortOrder: Int,
+    ): Result<Unit>
+
+    /** Удалить пункт мастер-плана. */
+    suspend fun deleteMasterPlanItem(studentId: String, itemId: String): Result<Unit>
 }
 
 @Singleton
@@ -72,4 +104,61 @@ class DefaultStudentProfileRepository @Inject constructor(
         )
         Unit
     }
+
+    override suspend fun createMasterPlan(studentId: String): Result<Unit> = runCatching {
+        api.createMasterPlan(studentId)
+        Unit
+    }
+
+    override suspend fun addMasterPlanSection(
+        studentId: String,
+        planId: String,
+        title: String,
+        category: String,
+        sortOrder: Int,
+    ): Result<Unit> = runCatching {
+        api.addMasterPlanSection(
+            studentId = studentId,
+            body = AddMasterPlanSectionRequest(
+                planId = planId,
+                title = title.trim(),
+                category = category,
+                sortOrder = sortOrder,
+            ),
+        )
+        Unit
+    }
+
+    override suspend fun deleteMasterPlanSection(studentId: String, sectionId: String): Result<Unit> =
+        runCatching {
+            api.deleteMasterPlanSection(studentId, sectionId)
+            Unit
+        }
+
+    override suspend fun addMasterPlanItem(
+        studentId: String,
+        sectionId: String,
+        title: String,
+        description: String?,
+        imageUrl: String?,
+        sortOrder: Int,
+    ): Result<Unit> = runCatching {
+        api.addMasterPlanItem(
+            studentId = studentId,
+            sectionId = sectionId,
+            body = AddMasterPlanItemRequest(
+                title = title.trim(),
+                description = description?.trim()?.takeIf { it.isNotEmpty() },
+                imageUrl = imageUrl?.trim()?.takeIf { it.isNotEmpty() },
+                sortOrder = sortOrder,
+            ),
+        )
+        Unit
+    }
+
+    override suspend fun deleteMasterPlanItem(studentId: String, itemId: String): Result<Unit> =
+        runCatching {
+            api.deleteMasterPlanItem(studentId, itemId)
+            Unit
+        }
 }

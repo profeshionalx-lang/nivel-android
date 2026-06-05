@@ -1,6 +1,7 @@
 package com.nivel.trainer.data.remote
 
 import retrofit2.http.Body
+import retrofit2.http.DELETE
 import retrofit2.http.GET
 import retrofit2.http.POST
 import retrofit2.http.Path
@@ -106,4 +107,41 @@ interface NivelApi {
         @Path("studentId") studentId: String,
         @Body body: CreateGoalRequest,
     ): CreateGoalResponse
+
+    // ---------------------------------------------------------------------------
+    // E5 (#28) — редактирование мастер-плана: план, секции, пункты (write A5).
+    // ---------------------------------------------------------------------------
+
+    /** Создать пустой мастер-план ученику (`POST .../master-plan`, 201). */
+    @POST("api/v1/students/{studentId}/master-plan")
+    suspend fun createMasterPlan(@Path("studentId") studentId: String): CreatedResponse
+
+    /** Добавить секцию в план (`POST .../master-plan/sections`, 201). */
+    @POST("api/v1/students/{studentId}/master-plan/sections")
+    suspend fun addMasterPlanSection(
+        @Path("studentId") studentId: String,
+        @Body body: AddMasterPlanSectionRequest,
+    ): CreatedResponse
+
+    /** Удалить секцию (и её пункты каскадом) (`DELETE .../sections/{sectionId}`). */
+    @DELETE("api/v1/students/{studentId}/master-plan/sections/{sectionId}")
+    suspend fun deleteMasterPlanSection(
+        @Path("studentId") studentId: String,
+        @Path("sectionId") sectionId: String,
+    ): OkResponse
+
+    /** Добавить пункт в секцию (`POST .../sections/{sectionId}/items`, 201). */
+    @POST("api/v1/students/{studentId}/master-plan/sections/{sectionId}/items")
+    suspend fun addMasterPlanItem(
+        @Path("studentId") studentId: String,
+        @Path("sectionId") sectionId: String,
+        @Body body: AddMasterPlanItemRequest,
+    ): CreatedResponse
+
+    /** Удалить пункт мастер-плана (`DELETE .../master-plan/items/{itemId}`). */
+    @DELETE("api/v1/students/{studentId}/master-plan/items/{itemId}")
+    suspend fun deleteMasterPlanItem(
+        @Path("studentId") studentId: String,
+        @Path("itemId") itemId: String,
+    ): OkResponse
 }

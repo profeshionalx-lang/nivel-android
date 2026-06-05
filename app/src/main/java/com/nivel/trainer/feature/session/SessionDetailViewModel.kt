@@ -2,9 +2,11 @@ package com.nivel.trainer.feature.session
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.nivel.trainer.data.repository.CardActionResult
 import com.nivel.trainer.data.repository.InsightsRepository
 import com.nivel.trainer.data.repository.InsightsResult
 import com.nivel.trainer.data.repository.SessionDetailRepository
+import com.nivel.trainer.domain.InsightCard
 import com.nivel.trainer.domain.SessionOverview
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -27,6 +29,36 @@ sealed interface PasteSheetState {
     ) : PasteSheetState
 }
 
+/** Допустимые темы/стороны карточки — один-в-один с вебом (`EditAiCardModal`). */
+val CARD_TAGS = listOf("техника", "тактика", "физика", "менталка")
+val CARD_SIDES = listOf("защита", "атака")
+
+/**
+ * Состояние bottom-sheet правки карточки (D3, порт `EditAiCardModal`). `Closed` —
+ * скрыт; `Open` — открыт с редактируемыми полями, индикатором отправки и ошибкой.
+ * `cardId` нужен для PATCH; `quote` показываем read-only (как в вебе).
+ */
+sealed interface EditSheetState {
+    data object Closed : EditSheetState
+    data class Open(
+        val cardId: String,
+        val title: String,
+        val body: String,
+        val tag: String,
+        val side: String,
+        val quote: String?,
+        val submitting: Boolean = false,
+        val error: String? = null,
+    ) : EditSheetState {
+        /** Валидность как в вебе: title 1..80, body 1..400, tag/side из наборов. */
+        val isValid: Boolean
+            get() = title.trim().length in 1..80 &&
+                body.trim().length in 1..400 &&
+                tag in CARD_TAGS &&
+                side in CARD_SIDES
+    }
+}
+
 /**
  * UI-состояние экрана карточки тренировки (B6) + создание инсайтов (D2).
  * Без кэша: первый кадр — спиннер, дальше либо данные, либо ошибка с «Повторить».
@@ -41,6 +73,10 @@ data class SessionDetailUiState(
     val generating: Boolean = false,
     /** D2 — ошибка авто-генерации (показываем с кнопкой «Повторить анализ»). */
     val generateError: String? = null,
+    /** D3 — шит правки карточки. */
+    val editSheet: EditSheetState = EditSheetState.Closed,
+    /** D3 — ошибка действия approve/reject (баннер; сбрасывается тапом/следующим действием). */
+    val cardActionError: String? = null,
 )
 
 /**
@@ -156,6 +192,100 @@ class SessionDetailViewModel @Inject constructor(
                 }
                 is InsightsResult.Failure ->
                     _uiState.update { it.copy(generating = false, generateError = result.message) }
+            }
+        }
+    }
+
+    // --- D3: ревью draft-карточек (одобрить / отклонить / редактировать) ---
+
+    /**
+     * Одобрить карточку. UI оптимистично убирает её из локальной очереди; здесь
+     * шлём действие на сервер и перечитываем карточки. При ошибке показываем
+     * баннер и тоже перечитываем — сервер вернёт правду (карточка снова в drafts).
+     */
+    fun approveCard(cardId: String) = runCardAction { insightsRepository.approveCard(cardId) }
+
+    /** Отклонить карточку (см. [approveCard]). */
+    fun rejectCard(cardId: String) = runCardAction { insightsRepository.rejectCard(cardId) }
+
+    private fun runCardAction(action: suspend () -> CardActionResult) {
+        _uiState.update { it.copy(cardActionError = null) }
+        viewModelScope.launch {
+            when (val result = action()) {
+                is CardActionResult.Success -> refresh()
+                is CardActionResult.Failure -> {
+                    _uiState.update { it.copy(cardActionError = result.message) }
+                    refresh()
+                }
+            }
+        }
+    }
+
+    fun dismissCardActionError() {
+        _uiState.update { it.copy(cardActionError = null) }
+    }
+
+    /** Открыть шит правки: начальные значения как в вебе (`EditAiCardModal`). */
+    fun openEditSheet(card: InsightCard) {
+        val title = card.title?.takeIf { it.isNotBlank() } ?: card.frontText.orEmpty()
+        val body = card.body?.takeIf { it.isNotBlank() } ?: card.contextText.orEmpty()
+        val tag = card.tags.getOrNull(0)?.takeIf { it in CARD_TAGS } ?: CARD_TAGS.first()
+        val side = card.tags.getOrNull(1)?.takeIf { it in CARD_SIDES } ?: "атака"
+        _uiState.update {
+            it.copy(
+                editSheet = EditSheetState.Open(
+                    cardId = card.id,
+                    title = title,
+                    body = body,
+                    tag = tag,
+                    side = side,
+                    quote = card.quote?.takeIf { q -> q.isNotBlank() },
+                ),
+            )
+        }
+    }
+
+    fun closeEditSheet() {
+        val sheet = _uiState.value.editSheet
+        if (sheet is EditSheetState.Open && sheet.submitting) return // не закрываем во время отправки
+        _uiState.update { it.copy(editSheet = EditSheetState.Closed) }
+    }
+
+    fun onEditTitleChange(value: String) = updateEditSheet { it.copy(title = value, error = null) }
+    fun onEditBodyChange(value: String) = updateEditSheet { it.copy(body = value, error = null) }
+    fun onEditTagChange(value: String) = updateEditSheet { it.copy(tag = value, error = null) }
+    fun onEditSideChange(value: String) = updateEditSheet { it.copy(side = value, error = null) }
+
+    private fun updateEditSheet(transform: (EditSheetState.Open) -> EditSheetState.Open) {
+        _uiState.update { state ->
+            val sheet = state.editSheet
+            if (sheet !is EditSheetState.Open) state else state.copy(editSheet = transform(sheet))
+        }
+    }
+
+    /** Сохранить правку. При успехе закрываем шит и перечитываем карточки. */
+    fun submitEdit() {
+        val sheet = _uiState.value.editSheet as? EditSheetState.Open ?: return
+        if (sheet.submitting || !sheet.isValid) return
+
+        _uiState.update { it.copy(editSheet = sheet.copy(submitting = true, error = null)) }
+        viewModelScope.launch {
+            val result = insightsRepository.updateCard(
+                cardId = sheet.cardId,
+                title = sheet.title.trim(),
+                body = sheet.body.trim(),
+                tag = sheet.tag,
+                side = sheet.side,
+            )
+            when (result) {
+                is CardActionResult.Success -> {
+                    _uiState.update { it.copy(editSheet = EditSheetState.Closed) }
+                    refresh()
+                }
+                is CardActionResult.Failure -> _uiState.update { state ->
+                    val open = state.editSheet as? EditSheetState.Open ?: return@update state
+                    state.copy(editSheet = open.copy(submitting = false, error = result.message))
+                }
             }
         }
     }

@@ -121,6 +121,7 @@ fun StudentProfileScreen(
         onDismissGoalCreator = viewModel::dismissGoalCreator,
         onCustomProblemChange = viewModel::onCustomProblemChange,
         onSelectProblem = viewModel::onSelectProblem,
+        onRetryProblems = viewModel::retryLoadProblems,
         onSubmitGoal = viewModel::submitGoal,
         modifier = modifier,
     )
@@ -139,6 +140,7 @@ private fun StudentProfileContent(
     onDismissGoalCreator: () -> Unit,
     onCustomProblemChange: (String) -> Unit,
     onSelectProblem: (Int?) -> Unit,
+    onRetryProblems: () -> Unit,
     onSubmitGoal: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -171,6 +173,7 @@ private fun StudentProfileContent(
             onDismiss = onDismissGoalCreator,
             onCustomProblemChange = onCustomProblemChange,
             onSelectProblem = onSelectProblem,
+            onRetryProblems = onRetryProblems,
             onSubmit = onSubmitGoal,
         )
     }
@@ -417,6 +420,7 @@ private fun GoalCreatorSheet(
     onDismiss: () -> Unit,
     onCustomProblemChange: (String) -> Unit,
     onSelectProblem: (Int?) -> Unit,
+    onRetryProblems: () -> Unit,
     onSubmit: () -> Unit,
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -468,7 +472,7 @@ private fun GoalCreatorSheet(
             )
 
             // Пикер проблемы из справочника (нативный эквивалент <select>).
-            ProblemPicker(state = state, onSelectProblem = onSelectProblem)
+            ProblemPicker(state = state, onSelectProblem = onSelectProblem, onRetry = onRetryProblems)
 
             state.error?.let { msg ->
                 Text(text = msg, color = ErrorColor, fontSize = 13.sp)
@@ -522,14 +526,27 @@ private fun GoalCreatorSheet(
 /**
  * Пикер проблемы — поле с выпадающим меню (нативный аналог `<select>` веба).
  * Первый пункт снимает привязку («— Без привязки —»). Пока справочник грузится —
- * поле неактивно со спиннером; свободный текст всё равно доступен.
+ * поле неактивно со спиннером; если загрузка сорвалась — тап повторяет её.
+ * Свободный текст доступен в любом случае.
  */
 @Composable
-private fun ProblemPicker(state: GoalCreatorState, onSelectProblem: (Int?) -> Unit) {
+private fun ProblemPicker(
+    state: GoalCreatorState,
+    onSelectProblem: (Int?) -> Unit,
+    onRetry: () -> Unit,
+) {
     var expanded by remember { mutableStateOf(false) }
     val selected = state.problems.firstOrNull { it.id == state.selectedProblemId }
-    val label = selected?.name ?: "— Привязать проблему (необязательно) —"
-    val pickerEnabled = !state.submitting && state.problems.isNotEmpty()
+    val hasProblems = state.problems.isNotEmpty()
+    val label = when {
+        state.problemsLoading -> "Загрузка справочника…"
+        state.problemsFailed && !hasProblems -> "Справочник недоступен — нажмите, чтобы повторить"
+        selected != null -> selected.name
+        else -> "— Привязать проблему (необязательно) —"
+    }
+    // Поле кликабельно, если идёт выбор из списка ИЛИ нужно повторить загрузку.
+    val clickEnabled = !state.submitting && !state.problemsLoading &&
+        (hasProblems || state.problemsFailed)
 
     Box {
         Row(
@@ -539,12 +556,14 @@ private fun ProblemPicker(state: GoalCreatorState, onSelectProblem: (Int?) -> Un
                 .clip(RoundedCornerShape(12.dp))
                 .background(SurfaceLow)
                 .border(1.dp, OnSurfaceVariant.copy(alpha = 0.3f), RoundedCornerShape(12.dp))
-                .clickable(enabled = pickerEnabled) { expanded = true }
+                .clickable(enabled = clickEnabled) {
+                    if (hasProblems) expanded = true else onRetry()
+                }
                 .padding(horizontal = 12.dp, vertical = 14.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                text = if (state.problemsLoading) "Загрузка справочника…" else label,
+                text = label,
                 color = if (selected != null) OnSurface else OnSurfaceVariant.copy(alpha = 0.7f),
                 fontSize = 14.sp,
                 maxLines = 1,
@@ -553,6 +572,8 @@ private fun ProblemPicker(state: GoalCreatorState, onSelectProblem: (Int?) -> Un
             )
             if (state.problemsLoading) {
                 CircularProgressIndicator(color = Primary, strokeWidth = 2.dp, modifier = Modifier.size(16.dp))
+            } else if (state.problemsFailed && !hasProblems) {
+                Text("↻", color = OnSurfaceVariant, fontSize = 16.sp)
             } else {
                 Text("▾", color = OnSurfaceVariant, fontSize = 14.sp)
             }
@@ -791,6 +812,7 @@ private fun StudentProfilePreview() {
             onDismissGoalCreator = {},
             onCustomProblemChange = {},
             onSelectProblem = {},
+            onRetryProblems = {},
             onSubmitGoal = {},
         )
     }
@@ -812,6 +834,7 @@ private fun StudentProfileEmptyPreview() {
             onDismissGoalCreator = {},
             onCustomProblemChange = {},
             onSelectProblem = {},
+            onRetryProblems = {},
             onSubmitGoal = {},
         )
     }

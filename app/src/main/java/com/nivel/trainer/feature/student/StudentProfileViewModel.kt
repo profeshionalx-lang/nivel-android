@@ -37,6 +37,8 @@ data class GoalCreatorState(
     val selectedProblemId: Int? = null,
     val problems: List<Problem> = emptyList(),
     val problemsLoading: Boolean = false,
+    /** Загрузка справочника сорвалась — пикер предлагает повтор (свободный текст доступен всегда). */
+    val problemsFailed: Boolean = false,
     val submitting: Boolean = false,
     val error: String? = null,
 ) {
@@ -126,18 +128,33 @@ class StudentProfileViewModel @Inject constructor(
         _uiState.update { it.copy(goalCreator = it.goalCreator.copy(selectedProblemId = problemId, error = null)) }
     }
 
+    /** Повторная загрузка справочника по тапу на пикер после неудачи. */
+    fun retryLoadProblems() {
+        if (!_uiState.value.goalCreator.problemsLoading) loadProblems()
+    }
+
     private fun loadProblems() {
-        _uiState.update { it.copy(goalCreator = it.goalCreator.copy(problemsLoading = true)) }
+        _uiState.update {
+            it.copy(goalCreator = it.goalCreator.copy(problemsLoading = true, problemsFailed = false))
+        }
         viewModelScope.launch {
             repository.getProblems()
                 .onSuccess { problems ->
                     _uiState.update {
-                        it.copy(goalCreator = it.goalCreator.copy(problems = problems, problemsLoading = false))
+                        it.copy(
+                            goalCreator = it.goalCreator.copy(
+                                problems = problems,
+                                problemsLoading = false,
+                                problemsFailed = false,
+                            ),
+                        )
                     }
                 }
                 .onFailure {
-                    // Справочник не критичен: свободный текст всё равно доступен.
-                    _uiState.update { it.copy(goalCreator = it.goalCreator.copy(problemsLoading = false)) }
+                    // Справочник не критичен (свободный текст доступен), но даём повтор.
+                    _uiState.update {
+                        it.copy(goalCreator = it.goalCreator.copy(problemsLoading = false, problemsFailed = true))
+                    }
                 }
         }
     }

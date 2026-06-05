@@ -299,3 +299,42 @@ data class InsightsErrorResponse(
     val error: String? = null,
     val line: Int? = null,
 )
+
+// -----------------------------------------------------------------------------
+// D1 (#19) — транскрипт тренировки (просмотр, выгрузка).
+// Контракт сверен по веб-эталону NIVEL (src/app/sessions/[id]/transcript/page.tsx
+// + TranscriptView.tsx) и таблице transcripts (миграция 010_session_transcripts).
+// Веб читает raw_text/segments_json/status напрямую из Supabase; /api/v1-эндпоинта
+// с ТЕКСТОМ транскрипта в NIVEL ещё нет (есть только .../transcript/status, отдающий
+// только статус). DTO выровнен на тот же шейп строки transcripts — реальный
+// эндпоинт Фундамента должен отдавать его как есть. Добавлено в конец файла.
+// -----------------------------------------------------------------------------
+
+/**
+ * Ответ GET /api/v1/sessions/{id}/transcript — строка transcripts один-в-один с
+ * вебом: статус обработки + сырой текст + сегменты с таймкодами + длительность.
+ *
+ * status: "processing" | "ready" | "failed" (значения из transcribeSessionCore).
+ * segments — массив сегментов Whisper; пуст для processing/failed.
+ */
+@Serializable
+data class TranscriptResponse(
+    val status: String,
+    @SerialName("error_message") val errorMessage: String? = null,
+    @SerialName("raw_text") val rawText: String? = null,
+    @SerialName("segments_json") val segments: List<TranscriptSegmentDto> = emptyList(),
+    @SerialName("duration_seconds") val durationSeconds: Int? = null,
+)
+
+/**
+ * Сегмент транскрипта Whisper (как в TranscriptView.tsx): таймкоды start/end в
+ * секундах, текст и avg_logprob — оценка уверенности (низкая → подсветка в UI).
+ */
+@Serializable
+data class TranscriptSegmentDto(
+    val id: Int,
+    val start: Double,
+    val end: Double,
+    val text: String,
+    @SerialName("avg_logprob") val avgLogprob: Double? = null,
+)

@@ -158,3 +158,42 @@ data class SessionOverview(
     val audio: SessionAudioStatus?,
     val cards: List<InsightCard>,
 )
+
+// --- D1 (#19): транскрипт тренировки (просмотр, выгрузка) ---
+
+/** Статус обработки транскрипта (значения сервера из transcribeSessionCore). */
+enum class TranscriptStatus {
+    PROCESSING,
+    READY,
+    FAILED;
+
+    companion object {
+        /** Парсит строку статуса с сервера; неизвестное трактуем как FAILED. */
+        fun from(raw: String?): TranscriptStatus = when (raw?.lowercase()) {
+            "processing" -> PROCESSING
+            "ready" -> READY
+            else -> FAILED
+        }
+    }
+}
+
+/**
+ * Транскрипт тренировочной сессии: статус + сырой текст + сегменты с таймкодами.
+ * Источник правды — сервер; экран точечный, без Room-кэша (как профиль ученика).
+ */
+data class Transcript(
+    val status: TranscriptStatus,
+    val errorMessage: String?,
+    val rawText: String?,
+    val segments: List<TranscriptSegment>,
+    val durationSeconds: Int?,
+)
+
+/** Сегмент транскрипта: таймкоды (сек), текст и оценка уверенности avg_logprob. */
+data class TranscriptSegment(
+    val id: Int,
+    val start: Double,
+    val end: Double,
+    val text: String,
+    val avgLogprob: Double?,
+)

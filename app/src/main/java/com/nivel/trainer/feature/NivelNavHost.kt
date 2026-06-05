@@ -13,6 +13,7 @@ import com.nivel.trainer.feature.home.HomeScreen
 import com.nivel.trainer.feature.home.StudentsListScreen
 import com.nivel.trainer.feature.session.SessionDetailScreen
 import com.nivel.trainer.feature.student.StudentProfileScreen
+import com.nivel.trainer.feature.transcript.TranscriptScreen
 
 /** Маршруты приложения. Расширяется по мере добавления экранов (B4/B5/B6 …). */
 object NivelRoutes {
@@ -30,6 +31,10 @@ object NivelRoutes {
     const val SESSION_ARG = "sessionId"
     const val SESSION_DETAIL = "sessions/{$SESSION_ARG}"
     fun sessionDetail(sessionId: String) = "sessions/$sessionId"
+
+    /** Транскрипт сессии (D1). Аргумент — id сессии (см. SESSION_ARG). */
+    const val TRANSCRIPT = "sessions/{$SESSION_ARG}/transcript"
+    fun transcript(sessionId: String) = "sessions/$sessionId/transcript"
 }
 
 /**
@@ -108,6 +113,18 @@ fun NivelNavHost(
         ) { backStackEntry ->
             val sessionId = backStackEntry.arguments?.getString(NivelRoutes.SESSION_ARG).orEmpty()
             SessionDetailScreen(
+                sessionId = sessionId,
+                onBack = { navController.popBackStack() },
+            )
+        }
+
+        // D1 (#19) — экран транскрипта тренировки (просмотр, выгрузка).
+        composable(
+            route = NivelRoutes.TRANSCRIPT,
+            arguments = listOf(navArgument(NivelRoutes.SESSION_ARG) { type = NavType.StringType }),
+        ) { backStackEntry ->
+            val sessionId = backStackEntry.arguments?.getString(NivelRoutes.SESSION_ARG).orEmpty()
+            TranscriptScreen(
                 sessionId = sessionId,
                 onBack = { navController.popBackStack() },
             )

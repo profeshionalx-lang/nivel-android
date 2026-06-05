@@ -15,6 +15,8 @@ import com.nivel.trainer.data.remote.ShadowStudentResponse
 import com.nivel.trainer.data.remote.StudentDetailResponse
 import com.nivel.trainer.data.remote.StudentDto
 import com.nivel.trainer.data.remote.StudentSessionDto
+import com.nivel.trainer.data.remote.TranscriptResponse
+import com.nivel.trainer.data.remote.TranscriptSegmentDto
 import com.nivel.trainer.domain.Goal
 import com.nivel.trainer.domain.InsightCard
 import com.nivel.trainer.domain.MasterPlan
@@ -27,6 +29,9 @@ import com.nivel.trainer.domain.Student
 import com.nivel.trainer.domain.StudentProfile
 import com.nivel.trainer.domain.StudentSession
 import com.nivel.trainer.domain.TrainingSession
+import com.nivel.trainer.domain.Transcript
+import com.nivel.trainer.domain.TranscriptSegment
+import com.nivel.trainer.domain.TranscriptStatus
 
 /**
  * Мапперы DTO → Entity (запись в кэш) и Entity → domain (выдача в UI).
@@ -157,6 +162,25 @@ fun MasterPlanSectionDto.toDomain() = MasterPlanSection(
 fun MasterPlanDto.toDomain() = MasterPlan(
     id = id,
     sections = sections.sortedBy { it.sortOrder }.map { it.toDomain() },
+)
+
+// --- D1 (#19): транскрипт (DTO → domain напрямую, без Room) ---
+
+fun TranscriptSegmentDto.toDomain() = TranscriptSegment(
+    id = id,
+    start = start,
+    end = end,
+    text = text,
+    avgLogprob = avgLogprob,
+)
+
+fun TranscriptResponse.toDomain() = Transcript(
+    status = TranscriptStatus.from(status),
+    errorMessage = errorMessage,
+    rawText = rawText,
+    // Сегменты упорядочены сервером по времени; сортируем по start для надёжности.
+    segments = segments.sortedBy { it.start }.map { it.toDomain() },
+    durationSeconds = durationSeconds,
 )
 
 /** Склейка detail + master-plan в единую доменную модель профиля. */

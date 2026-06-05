@@ -6,12 +6,14 @@ import com.nivel.trainer.data.repository.DefaultSessionDetailRepository
 import com.nivel.trainer.data.repository.DefaultSessionRepository
 import com.nivel.trainer.data.repository.DefaultStudentProfileRepository
 import com.nivel.trainer.data.repository.DefaultStudentRepository
+import com.nivel.trainer.data.repository.DefaultTranscriptRepository
 import com.nivel.trainer.data.repository.InsightCardRepository
 import com.nivel.trainer.data.repository.InsightsRepository
 import com.nivel.trainer.data.repository.SessionDetailRepository
 import com.nivel.trainer.data.repository.SessionRepository
 import com.nivel.trainer.data.repository.StudentProfileRepository
 import com.nivel.trainer.data.repository.StudentRepository
+import com.nivel.trainer.data.repository.TranscriptRepository
 import dagger.Binds
 import dagger.Module
 import dagger.hilt.InstallIn
@@ -50,4 +52,9 @@ abstract class RepositoryModule {
     @Binds
     @Singleton
     abstract fun bindInsightsRepository(impl: DefaultInsightsRepository): InsightsRepository
+
+    // D1 (#19) — транскрипт тренировки.
+    @Binds
+    @Singleton
+    abstract fun bindTranscriptRepository(impl: DefaultTranscriptRepository): TranscriptRepository
 }

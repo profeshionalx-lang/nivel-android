@@ -48,6 +48,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
@@ -451,6 +452,7 @@ private fun MasterPlanSectionCard(
                     modifier = Modifier
                         .size(TouchTarget)
                         .clip(CircleShape)
+                        .alpha(if (state.busy) 0.4f else 1f)
                         .clickable(enabled = !state.busy) { actions.onDeleteSection(section.id) },
                     contentAlignment = Alignment.Center,
                 ) {
@@ -526,6 +528,7 @@ private fun MasterPlanItemRow(
             modifier = Modifier
                 .size(TouchTarget)
                 .clip(CircleShape)
+                .alpha(if (state.busy) 0.4f else 1f)
                 .clickable(enabled = !state.busy) { actions.onDeleteItem(item.id) },
             contentAlignment = Alignment.Center,
         ) {

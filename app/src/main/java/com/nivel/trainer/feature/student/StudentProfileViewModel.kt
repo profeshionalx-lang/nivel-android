@@ -271,7 +271,18 @@ class StudentProfileViewModel @Inject constructor(
     }
 
     fun deleteSection(sectionId: String) =
-        mutateMasterPlan({ repository.deleteMasterPlanSection(it, sectionId) })
+        mutateMasterPlan(
+            op = { repository.deleteMasterPlanSection(it, sectionId) },
+            // Если у удаляемой секции была открыта форма пункта — закрываем её,
+            // чтобы не осталось висящего состояния на исчезнувшей секции.
+            resetOnSuccess = { st ->
+                if (st.addingItemToSectionId == sectionId) {
+                    st.copy(addingItemToSectionId = null, newItemTitle = "", newItemDesc = "", newItemImage = "")
+                } else {
+                    st
+                }
+            },
+        )
 
     fun deleteItem(itemId: String) =
         mutateMasterPlan({ repository.deleteMasterPlanItem(it, itemId) })

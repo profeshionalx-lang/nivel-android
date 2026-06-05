@@ -35,6 +35,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -91,7 +92,8 @@ fun RecorderScreen(
     val state by viewModel.state.collectAsStateWithLifecycle()
 
     // Отказ в разрешении на микрофон — показываем объяснение вместо записи.
-    var micDenied by remember { mutableStateOf(false) }
+    // Saveable, чтобы после поворота экрана не дёргать системный диалог повторно.
+    var micDenied by rememberSaveable { mutableStateOf(false) }
 
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions(),
@@ -107,10 +109,16 @@ fun RecorderScreen(
         }
     }
 
-    // Запуск при входе: только если запись ещё не идёт/не завершена (например, экран
-    // переоткрыт во время активной записи — тогда просто показываем таймер).
+    // Запуск при входе на экран. Контроллер `@Singleton` и его стейт process-wide,
+    // поэтому при входе мог остаться терминальный стейт ПРОШЛОЙ записи (Finished/Error,
+    // если с экрана ушли «Назад» до авто-сброса) — сбрасываем его, чтобы не залипнуть
+    // на чужом результате. Если активная запись уже идёт (экран переоткрыт во время
+    // записи) — ничего не стартуем, просто покажем таймер.
     LaunchedEffect(Unit) {
-        if (state is RecordingState.Idle && !micDenied) {
+        if (state is RecordingState.Finished || state is RecordingState.Error) {
+            viewModel.acknowledge()
+        }
+        if (state !is RecordingState.Recording && !micDenied) {
             if (RecordingPermissions.hasMicPermission(context)) {
                 viewModel.start(sessionId)
             } else {
@@ -120,8 +128,10 @@ fun RecorderScreen(
     }
 
     // По завершении записи: короткий статус, затем сброс и возврат на карточку.
-    LaunchedEffect(state) {
-        if (state is RecordingState.Finished) {
+    // Ключ — факт завершения (а не весь объект), чтобы не перезапускаться на иных апдейтах.
+    val finished = state is RecordingState.Finished
+    LaunchedEffect(finished) {
+        if (finished) {
             delay(1_400)
             viewModel.acknowledge()
             onClose()
@@ -151,7 +161,7 @@ fun RecorderScreen(
                     glyph = "✓",
                     glyphColor = Primary,
                     title = "Запись сохранена",
-                    subtitle = "Заливка началась — транскрипт появится через 15–30 сек.",
+                    subtitle = "Транскрипция запущена — обычно занимает 15–30 секунд.",
                 )
 
                 is RecordingState.Error -> ErrorContent(

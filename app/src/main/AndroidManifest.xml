@@ -51,7 +51,7 @@
              чтобы поднять его on-demand с HiltWorkerFactory (см. NivelApp). -->
         <provider
             android:name="androidx.startup.InitializationProvider"
-            android:authority="${applicationId}.androidx-startup"
+            android:authorities="${applicationId}.androidx-startup"
             android:exported="false"
             tools:node="merge">
             <meta-data

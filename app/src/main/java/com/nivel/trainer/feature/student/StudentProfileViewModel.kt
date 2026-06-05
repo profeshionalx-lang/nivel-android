@@ -24,6 +24,25 @@ data class StudentProfileUiState(
     val profile: StudentProfile? = null,
     val error: String? = null,
     val goalCreator: GoalCreatorState = GoalCreatorState(),
+    val masterPlan: MasterPlanEditorState = MasterPlanEditorState(),
+)
+
+/**
+ * Состояние редактора мастер-плана (E5, #28) — порт локального состояния веб-
+ * `MasterPlanEditor`. Открыта максимум одна форма добавления секции и одна форма
+ * добавления пункта одновременно (как `addingSectionTo`/`addingItemTo` в вебе).
+ * [busy] гейтит кнопки во время сетевой операции (как `isPending`).
+ */
+data class MasterPlanEditorState(
+    val addingSection: Boolean = false,
+    val newSectionTitle: String = "",
+    val newSectionCategory: String = "technique",
+    val addingItemToSectionId: String? = null,
+    val newItemTitle: String = "",
+    val newItemDesc: String = "",
+    val newItemImage: String = "",
+    val busy: Boolean = false,
+    val error: String? = null,
 )
 
 /**
@@ -182,6 +201,103 @@ class StudentProfileViewModel @Inject constructor(
                     _uiState.update {
                         it.copy(goalCreator = it.goalCreator.copy(submitting = false, error = mapError(e)))
                     }
+                }
+        }
+    }
+
+    // --- E5 (#28): редактирование мастер-плана ---
+
+    fun createMasterPlan() = mutateMasterPlan({ repository.createMasterPlan(it) })
+
+    fun startAddSection() =
+        _uiState.update { it.copy(masterPlan = it.masterPlan.copy(addingSection = true, error = null)) }
+
+    fun cancelAddSection() =
+        _uiState.update { it.copy(masterPlan = it.masterPlan.copy(addingSection = false, newSectionTitle = "")) }
+
+    fun onNewSectionTitleChange(text: String) =
+        _uiState.update { it.copy(masterPlan = it.masterPlan.copy(newSectionTitle = text)) }
+
+    fun onNewSectionCategoryChange(category: String) =
+        _uiState.update { it.copy(masterPlan = it.masterPlan.copy(newSectionCategory = category)) }
+
+    fun submitAddSection(planId: String) {
+        val mp = _uiState.value.masterPlan
+        if (mp.newSectionTitle.isBlank()) return
+        // sortOrder = текущее число секций (как `plan.sections.length` в вебе).
+        val sortOrder = _uiState.value.profile?.masterPlan?.sections?.size ?: 0
+        mutateMasterPlan(
+            op = { repository.addMasterPlanSection(it, planId, mp.newSectionTitle, mp.newSectionCategory, sortOrder) },
+            resetOnSuccess = { it.copy(addingSection = false, newSectionTitle = "") },
+        )
+    }
+
+    fun startAddItem(sectionId: String) =
+        _uiState.update { it.copy(masterPlan = it.masterPlan.copy(addingItemToSectionId = sectionId, error = null)) }
+
+    fun cancelAddItem() =
+        _uiState.update {
+            it.copy(
+                masterPlan = it.masterPlan.copy(
+                    addingItemToSectionId = null,
+                    newItemTitle = "",
+                    newItemDesc = "",
+                    newItemImage = "",
+                ),
+            )
+        }
+
+    fun onNewItemTitleChange(text: String) =
+        _uiState.update { it.copy(masterPlan = it.masterPlan.copy(newItemTitle = text)) }
+
+    fun onNewItemDescChange(text: String) =
+        _uiState.update { it.copy(masterPlan = it.masterPlan.copy(newItemDesc = text)) }
+
+    fun onNewItemImageChange(text: String) =
+        _uiState.update { it.copy(masterPlan = it.masterPlan.copy(newItemImage = text)) }
+
+    fun submitAddItem(sectionId: String) {
+        val mp = _uiState.value.masterPlan
+        if (mp.newItemTitle.isBlank()) return
+        // sortOrder = текущее число пунктов секции (как `items.length` в вебе).
+        val sortOrder = _uiState.value.profile?.masterPlan?.sections
+            ?.firstOrNull { it.id == sectionId }?.items?.size ?: 0
+        mutateMasterPlan(
+            op = { repository.addMasterPlanItem(it, sectionId, mp.newItemTitle, mp.newItemDesc, mp.newItemImage, sortOrder) },
+            resetOnSuccess = {
+                it.copy(addingItemToSectionId = null, newItemTitle = "", newItemDesc = "", newItemImage = "")
+            },
+        )
+    }
+
+    fun deleteSection(sectionId: String) =
+        mutateMasterPlan({ repository.deleteMasterPlanSection(it, sectionId) })
+
+    fun deleteItem(itemId: String) =
+        mutateMasterPlan({ repository.deleteMasterPlanItem(it, itemId) })
+
+    /**
+     * Общий раннер мутаций мастер-плана: гейтит повторный запуск пока [busy],
+     * по успеху сбрасывает форму (resetOnSuccess) и перечитывает профиль (источник
+     * правды — сервер), по ошибке показывает баннер и форму оставляет открытой.
+     */
+    private fun mutateMasterPlan(
+        op: suspend (studentId: String) -> Result<Unit>,
+        resetOnSuccess: (MasterPlanEditorState) -> MasterPlanEditorState = { it },
+    ) {
+        val id = studentId ?: return
+        if (_uiState.value.masterPlan.busy) return
+        _uiState.update { it.copy(masterPlan = it.masterPlan.copy(busy = true, error = null)) }
+        viewModelScope.launch {
+            op(id)
+                .onSuccess {
+                    _uiState.update {
+                        it.copy(masterPlan = resetOnSuccess(it.masterPlan).copy(busy = false, error = null))
+                    }
+                    refresh()
+                }
+                .onFailure { e ->
+                    _uiState.update { it.copy(masterPlan = it.masterPlan.copy(busy = false, error = mapError(e))) }
                 }
         }
     }

@@ -273,3 +273,36 @@ data class CreateGoalResponse(
     val ok: Boolean = true,
     val goalId: String? = null,
 )
+
+// -----------------------------------------------------------------------------
+// E5 (#28) — редактирование мастер-плана: создать план, секции и пункты (write A5).
+// Чтение плана уже есть (MasterPlanResponse/MasterPlanDto, B5).
+// -----------------------------------------------------------------------------
+
+/** Общий ответ create-операций мастер-плана — `{ ok, id }`, 201. */
+@Serializable
+data class CreatedResponse(
+    val ok: Boolean = true,
+    val id: String? = null,
+)
+
+/**
+ * Тело `POST /api/v1/students/{id}/master-plan/sections`. `category` ∈
+ * {strength, technique, tactics, custom} (валидируется сервером).
+ */
+@Serializable
+data class AddMasterPlanSectionRequest(
+    val planId: String,
+    val title: String,
+    val category: String,
+    val sortOrder: Int? = null,
+)
+
+/** Тело `POST /api/v1/students/{id}/master-plan/sections/{sectionId}/items`. */
+@Serializable
+data class AddMasterPlanItemRequest(
+    val title: String,
+    val description: String? = null,
+    val imageUrl: String? = null,
+    val sortOrder: Int? = null,
+)

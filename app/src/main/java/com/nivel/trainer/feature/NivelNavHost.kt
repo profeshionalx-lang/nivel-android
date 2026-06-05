@@ -11,6 +11,7 @@ import com.nivel.trainer.feature.auth.LoginScreen
 import com.nivel.trainer.feature.auth.SplashScreen
 import com.nivel.trainer.feature.home.HomeScreen
 import com.nivel.trainer.feature.home.StudentsListScreen
+import com.nivel.trainer.feature.recorder.RecorderScreen
 import com.nivel.trainer.feature.session.SessionDetailScreen
 import com.nivel.trainer.feature.student.StudentProfileScreen
 import com.nivel.trainer.feature.transcript.TranscriptScreen
@@ -35,6 +36,10 @@ object NivelRoutes {
     /** Транскрипт сессии (D1). Аргумент — id сессии (см. SESSION_ARG). */
     const val TRANSCRIPT = "sessions/{$SESSION_ARG}/transcript"
     fun transcript(sessionId: String) = "sessions/$sessionId/transcript"
+
+    /** Экран записи тренировки (C2). Аргумент — id сессии (см. SESSION_ARG). */
+    const val RECORD = "sessions/{$SESSION_ARG}/record"
+    fun record(sessionId: String) = "sessions/$sessionId/record"
 }
 
 /**
@@ -115,6 +120,19 @@ fun NivelNavHost(
             SessionDetailScreen(
                 sessionId = sessionId,
                 onBack = { navController.popBackStack() },
+                onRecord = { navController.navigate(NivelRoutes.record(sessionId)) },
+            )
+        }
+
+        // C2 (#11) — экран записи тренировки (таймер, «Стоп» → заливка).
+        composable(
+            route = NivelRoutes.RECORD,
+            arguments = listOf(navArgument(NivelRoutes.SESSION_ARG) { type = NavType.StringType }),
+        ) { backStackEntry ->
+            val sessionId = backStackEntry.arguments?.getString(NivelRoutes.SESSION_ARG).orEmpty()
+            RecorderScreen(
+                sessionId = sessionId,
+                onClose = { navController.popBackStack() },
             )
         }
 

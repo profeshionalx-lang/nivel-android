@@ -94,6 +94,7 @@ private val RuLocale = Locale("ru", "RU")
 fun SessionDetailScreen(
     sessionId: String,
     onBack: () -> Unit = {},
+    onRecord: () -> Unit = {},
     modifier: Modifier = Modifier,
     viewModel: SessionDetailViewModel = hiltViewModel(),
 ) {
@@ -125,6 +126,7 @@ fun SessionDetailScreen(
         onGenerate = viewModel::generateInsights,
         onOpenPaste = viewModel::openPasteSheet,
         onBack = onBack,
+        onRecord = onRecord,
         onRetry = viewModel::refresh,
         modifier = modifier,
     )
@@ -155,6 +157,7 @@ private fun SessionDetailContent(
     generateError: String? = null,
     onGenerate: () -> Unit = {},
     onOpenPaste: () -> Unit = {},
+    onRecord: () -> Unit = {},
 ) {
     Column(
         modifier = modifier
@@ -174,6 +177,7 @@ private fun SessionDetailContent(
                 generateError = generateError,
                 onGenerate = onGenerate,
                 onOpenPaste = onOpenPaste,
+                onRecord = onRecord,
             )
 
             else -> CenterBox { EmptyState() }
@@ -216,6 +220,7 @@ private fun SessionBody(
     generateError: String?,
     onGenerate: () -> Unit,
     onOpenPaste: () -> Unit,
+    onRecord: () -> Unit,
 ) {
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -223,7 +228,7 @@ private fun SessionBody(
         verticalArrangement = Arrangement.spacedBy(24.dp),
     ) {
         item { StatusBlock(overview.detail) }
-        item { AudioSection(overview.audio) }
+        item { AudioSection(overview.audio, onRecord = onRecord) }
         item {
             CardsSection(
                 audio = overview.audio,
@@ -263,15 +268,17 @@ private fun StatusBlock(detail: SessionDetail) {
 }
 
 /**
- * Секция аудио/транскрипта (веб, trainer). `audio == null` (записи нет) → вместо
- * веб-аплоадера показываем нейтральное «Записи пока нет» (запись идёт через Epic 2).
+ * Секция аудио/транскрипта (веб, trainer). Когда транскрипта ещё нет (`audio == null`),
+ * веб показывает аплоадер файла; нативный эквивалент — кнопка «Записать тренировку»
+ * (C2, #11): тренер пишет аудио прямо в приложении вместо заливки файла.
+ * Когда транскрипт готов/в процессе/с ошибкой — статусы один-в-один с вебом.
  */
 @Composable
-private fun AudioSection(audio: SessionAudioStatus?) {
+private fun AudioSection(audio: SessionAudioStatus?, onRecord: () -> Unit = {}) {
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Label("Аудио тренировки")
         when {
-            audio == null -> StatusCard(glyph = "🎙", title = "Записи пока нет", subtitle = null)
+            audio == null -> RecordButton(onRecord)
             audio.transcriptStatus == "ready" ->
                 StatusCard(glyph = "📄", title = "Транскрипт готов", subtitle = null, accent = Primary)
             audio.transcriptStatus == "processing" ->
@@ -284,6 +291,41 @@ private fun AudioSection(audio: SessionAudioStatus?) {
                     accent = ErrorColor,
                 )
         }
+    }
+}
+
+/**
+ * Карточка-кнопка «Записать тренировку» (C2, #11) — нативная замена веб-аплоадера
+ * (`AudioUploader`) на странице сессии. Открывает экран записи; сама запись идёт в
+ * foreground-сервисе и привязана к этой сессии. Стиль — как у `PasteInsightButton`.
+ */
+@Composable
+private fun RecordButton(onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = TouchTarget)
+            .clickable(onClick = onClick)
+            .background(SurfaceCard, RoundedCornerShape(16.dp))
+            .padding(16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Text("🎙", fontSize = 18.sp)
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = "Записать тренировку",
+                color = OnSurface,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Bold,
+            )
+            Text(
+                text = "Запись в фоне — телефон в карман, экран можно заблокировать",
+                color = OnSurfaceVariant,
+                fontSize = 12.sp,
+            )
+        }
+        Text("›", color = OnSurfaceVariant, fontSize = 20.sp)
     }
 }
 

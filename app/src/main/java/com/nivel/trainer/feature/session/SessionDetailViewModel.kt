@@ -233,6 +233,7 @@ class SessionDetailViewModel @Inject constructor(
         val side = card.tags.getOrNull(1)?.takeIf { it in CARD_SIDES } ?: "атака"
         _uiState.update {
             it.copy(
+                cardActionError = null,
                 editSheet = EditSheetState.Open(
                     cardId = card.id,
                     title = title,

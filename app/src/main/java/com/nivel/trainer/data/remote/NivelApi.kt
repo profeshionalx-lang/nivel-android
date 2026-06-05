@@ -83,4 +83,8 @@ interface NivelApi {
      */
     @GET("api/v1/students/{studentId}/master-plan")
     suspend fun getStudentMasterPlan(@Path("studentId") studentId: String): MasterPlanResponse
+
+    // E1 (#24) — создать тренировку (Вариант А: без упражнений, POST /api/v1/sessions/for-student).
+    @POST("api/v1/sessions/for-student")
+    suspend fun createSessionForStudent(@Body body: CreateSessionForStudentRequest): CreateSessionForStudentResponse
 }

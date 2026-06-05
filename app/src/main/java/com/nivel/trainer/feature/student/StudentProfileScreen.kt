@@ -14,6 +14,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
@@ -24,10 +26,19 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -82,6 +93,7 @@ private val RuLocale = Locale("ru", "RU")
  * цели (горизонтальная карусель), сессии (список, тап → карточка сессии B6).
  * Состояния загрузки/пусто/ошибка обязательны.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun StudentProfileScreen(
     studentId: String,
@@ -100,8 +112,26 @@ fun StudentProfileScreen(
         onBack = onBack,
         onOpenSession = onOpenSession,
         onRetry = viewModel::refresh,
+        onCreateSession = viewModel::openModal,
         modifier = modifier,
     )
+
+    if (state.modal.show) {
+        ModalBottomSheet(
+            onDismissRequest = viewModel::dismissModal,
+            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+            containerColor = Color(0xFF1E1E1E),
+        ) {
+            CreateSessionModal(
+                modal = state.modal,
+                onDateChange = viewModel::updateDateInput,
+                onCompletedChange = viewModel::updateCompleted,
+                onNotesChange = viewModel::updateTrainerNotes,
+                onSubmit = viewModel::submitCreateSession,
+                onDismiss = viewModel::dismissModal,
+            )
+        }
+    }
 }
 
 @Composable
@@ -112,6 +142,7 @@ private fun StudentProfileContent(
     onBack: () -> Unit,
     onOpenSession: (String) -> Unit,
     onRetry: () -> Unit,
+    onCreateSession: (goalId: String, goalTitle: String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -126,7 +157,11 @@ private fun StudentProfileContent(
 
             error != null && profile == null -> CenterBox { ErrorState(error, onRetry) }
 
-            profile != null -> ProfileBody(profile = profile, onOpenSession = onOpenSession)
+            profile != null -> ProfileBody(
+                profile = profile,
+                onOpenSession = onOpenSession,
+                onCreateSession = onCreateSession,
+            )
 
             else -> CenterBox { EmptyState() }
         }
@@ -159,7 +194,11 @@ private fun Header(onBack: () -> Unit) {
 }
 
 @Composable
-private fun ProfileBody(profile: StudentProfile, onOpenSession: (String) -> Unit) {
+private fun ProfileBody(
+    profile: StudentProfile,
+    onOpenSession: (String) -> Unit,
+    onCreateSession: (goalId: String, goalTitle: String) -> Unit,
+) {
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 32.dp),
@@ -169,7 +208,7 @@ private fun ProfileBody(profile: StudentProfile, onOpenSession: (String) -> Unit
         profile.masterPlan?.let { plan ->
             if (plan.sections.isNotEmpty()) item { MasterPlanBlock(plan) }
         }
-        item { GoalsSection(profile.goals) }
+        item { GoalsSection(profile.goals, onCreateSession) }
         item { SessionsSection(profile.sessions, onOpenSession) }
     }
 }
@@ -266,9 +305,9 @@ private fun MasterPlanBlock(plan: MasterPlan) {
     }
 }
 
-/** Секция «Активные цели» — горизонтальная карусель карточек целей. */
+/** Секция «Активные цели» — горизонтальная карусель карточек целей. Тап → модалка создания тренировки. */
 @Composable
-private fun GoalsSection(goals: List<Goal>) {
+private fun GoalsSection(goals: List<Goal>, onCreateSession: (goalId: String, goalTitle: String) -> Unit) {
     Column {
         SectionTitle("Активные цели")
         Spacer(Modifier.size(12.dp))
@@ -279,21 +318,23 @@ private fun GoalsSection(goals: List<Goal>) {
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                 contentPadding = PaddingValues(end = 4.dp),
             ) {
-                items(goals, key = { it.id }) { goal -> GoalCard(goal) }
+                items(goals, key = { it.id }) { goal -> GoalCard(goal, onCreateSession) }
             }
         }
     }
 }
 
 @Composable
-private fun GoalCard(goal: Goal) {
+private fun GoalCard(goal: Goal, onCreateSession: (goalId: String, goalTitle: String) -> Unit) {
     // Веб: карточка с верхним акцентом `borderTop: 2px solid primary`.
     // Compose не даёт per-side border — клипуем и кладём верхнюю полосу primary.
+    val title = goal.customProblem?.takeIf { it.isNotBlank() } ?: "—"
     Column(
         modifier = Modifier
             .width(208.dp)
             .clip(RoundedCornerShape(16.dp))
-            .background(SurfaceCard),
+            .background(SurfaceCard)
+            .clickable { onCreateSession(goal.id, title) },
     ) {
         Box(modifier = Modifier.fillMaxWidth().height(2.dp).background(Primary))
         Column(modifier = Modifier.padding(16.dp)) {
@@ -310,12 +351,19 @@ private fun GoalCard(goal: Goal) {
             }
             Spacer(Modifier.size(8.dp))
             Text(
-                text = goal.customProblem?.takeIf { it.isNotBlank() } ?: "—",
+                text = title,
                 color = OnSurface,
                 fontSize = 14.sp,
                 fontWeight = FontWeight.SemiBold,
                 maxLines = 4,
                 overflow = TextOverflow.Ellipsis,
+            )
+            Spacer(Modifier.size(8.dp))
+            Text(
+                text = "+ тренировка",
+                color = Primary,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.SemiBold,
             )
         }
     }
@@ -486,6 +534,111 @@ private fun initials(fullName: String?): String {
     return parts.take(2).joinToString("") { it.first().uppercase() }
 }
 
+// --- Модалка создания тренировки (E1, Вариант А) ---
+
+@Composable
+private fun CreateSessionModal(
+    modal: CreateSessionModalState,
+    onDateChange: (String) -> Unit,
+    onCompletedChange: (Boolean) -> Unit,
+    onNotesChange: (String) -> Unit,
+    onSubmit: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val fieldColors = OutlinedTextFieldDefaults.colors(
+        focusedBorderColor = Primary,
+        unfocusedBorderColor = Color(0xFF444444),
+        focusedLabelColor = Primary,
+        unfocusedLabelColor = OnSurfaceVariant,
+        cursorColor = Primary,
+        focusedTextColor = OnSurface,
+        unfocusedTextColor = OnSurface,
+    )
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 24.dp, vertical = 8.dp)
+            .navigationBarsPadding()
+            .imePadding(),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+    ) {
+        Text(
+            text = "Новая тренировка",
+            color = Primary,
+            fontSize = 18.sp,
+            fontWeight = FontWeight.Black,
+            fontStyle = FontStyle.Italic,
+        )
+        if (modal.goalTitle.isNotBlank()) {
+            Text(
+                text = modal.goalTitle,
+                color = OnSurfaceVariant,
+                fontSize = 13.sp,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        OutlinedTextField(
+            value = modal.dateInput,
+            onValueChange = onDateChange,
+            label = { Text("Дата и время") },
+            placeholder = { Text("2026-06-05 12:00", color = Color(0xFF666666)) },
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true,
+            colors = fieldColors,
+        )
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.clickable { onCompletedChange(!modal.completed) },
+        ) {
+            Checkbox(
+                checked = modal.completed,
+                onCheckedChange = onCompletedChange,
+                colors = CheckboxDefaults.colors(
+                    checkedColor = Primary,
+                    uncheckedColor = OnSurfaceVariant,
+                    checkmarkColor = OnPrimary,
+                ),
+            )
+            Spacer(Modifier.width(8.dp))
+            Text("Тренировка уже проведена", color = OnSurface, fontSize = 14.sp)
+        }
+        OutlinedTextField(
+            value = modal.trainerNotes,
+            onValueChange = onNotesChange,
+            label = { Text("Заметки тренера") },
+            modifier = Modifier.fillMaxWidth().heightIn(min = 80.dp),
+            maxLines = 4,
+            colors = fieldColors,
+        )
+        if (modal.error != null) {
+            Text(text = modal.error, color = ErrorColor, fontSize = 13.sp)
+        }
+        Button(
+            onClick = onSubmit,
+            enabled = !modal.submitting,
+            modifier = Modifier.fillMaxWidth().height(TouchTarget),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = Primary,
+                contentColor = OnPrimary,
+                disabledContainerColor = Color(0xFF444444),
+                disabledContentColor = OnSurfaceVariant,
+            ),
+            shape = RoundedCornerShape(12.dp),
+        ) {
+            if (modal.submitting) {
+                CircularProgressIndicator(color = OnPrimary, modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+            } else {
+                Text("Создать", fontWeight = FontWeight.Bold, fontSize = 15.sp)
+            }
+        }
+        TextButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) {
+            Text("Отмена", color = OnSurfaceVariant, fontSize = 14.sp)
+        }
+        Spacer(Modifier.height(8.dp))
+    }
+}
+
 // --- Previews ---
 
 private val previewProfile = StudentProfile(
@@ -526,6 +679,7 @@ private fun StudentProfilePreview() {
             onBack = {},
             onOpenSession = {},
             onRetry = {},
+            onCreateSession = { _, _ -> },
         )
     }
 }
@@ -541,6 +695,27 @@ private fun StudentProfileEmptyPreview() {
             onBack = {},
             onOpenSession = {},
             onRetry = {},
+            onCreateSession = { _, _ -> },
+        )
+    }
+}
+
+@Preview(showBackground = true, backgroundColor = 0xFF1E1E1E)
+@Composable
+private fun CreateSessionModalPreview() {
+    NivelTheme {
+        CreateSessionModal(
+            modal = CreateSessionModalState(
+                show = true,
+                goalTitle = "Стабильный приём слева под давлением",
+                dateInput = "2026-06-05 12:00",
+                completed = false,
+            ),
+            onDateChange = {},
+            onCompletedChange = {},
+            onNotesChange = {},
+            onSubmit = {},
+            onDismiss = {},
         )
     }
 }

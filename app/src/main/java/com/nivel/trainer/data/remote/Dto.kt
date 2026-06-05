@@ -222,3 +222,20 @@ data class MasterPlanItemDto(
     @SerialName("image_url") val imageUrl: String? = null,
     @SerialName("sort_order") val sortOrder: Int = 0,
 )
+
+// E1 (#24) — создание тренировки без упражнений (POST /api/v1/sessions/for-student).
+@Serializable
+data class CreateSessionForStudentRequest(
+    @SerialName("studentId") val studentId: String,
+    @SerialName("goalId") val goalId: String,
+    @SerialName("scheduledAt") val scheduledAt: String? = null,
+    @SerialName("completedAt") val completedAt: String? = null,
+    @SerialName("trainerNotes") val trainerNotes: String? = null,
+    @SerialName("status") val status: String? = null,
+)
+
+@Serializable
+data class CreateSessionForStudentResponse(
+    val ok: Boolean,
+    @SerialName("sessionId") val sessionId: String,
+)

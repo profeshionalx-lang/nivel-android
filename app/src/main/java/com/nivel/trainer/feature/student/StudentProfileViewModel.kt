@@ -10,7 +10,21 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import java.time.LocalDateTime
+import java.time.ZoneOffset
+import java.time.format.DateTimeFormatter
 import javax.inject.Inject
+
+data class CreateSessionModalState(
+    val show: Boolean = false,
+    val goalId: String = "",
+    val goalTitle: String = "",
+    val dateInput: String = "",
+    val completed: Boolean = false,
+    val trainerNotes: String = "",
+    val submitting: Boolean = false,
+    val error: String? = null,
+)
 
 /**
  * UI-состояние экрана профиля ученика (B5).
@@ -20,6 +34,7 @@ data class StudentProfileUiState(
     val loading: Boolean = true,
     val profile: StudentProfile? = null,
     val error: String? = null,
+    val modal: CreateSessionModalState = CreateSessionModalState(),
 )
 
 /**
@@ -65,6 +80,59 @@ class StudentProfileViewModel @Inject constructor(
                 }
         }
     }
+
+    fun openModal(goalId: String, goalTitle: String) {
+        _uiState.update { it.copy(modal = CreateSessionModalState(show = true, goalId = goalId, goalTitle = goalTitle)) }
+    }
+
+    fun dismissModal() {
+        _uiState.update { it.copy(modal = CreateSessionModalState()) }
+    }
+
+    fun updateDateInput(v: String) {
+        _uiState.update { it.copy(modal = it.modal.copy(dateInput = v, error = null)) }
+    }
+
+    fun updateCompleted(v: Boolean) {
+        _uiState.update { it.copy(modal = it.modal.copy(completed = v)) }
+    }
+
+    fun updateTrainerNotes(v: String) {
+        _uiState.update { it.copy(modal = it.modal.copy(trainerNotes = v)) }
+    }
+
+    fun submitCreateSession() {
+        val id = studentId ?: return
+        val m = _uiState.value.modal
+        val isoDate = parseDate(m.dateInput)
+        if (isoDate == null) {
+            _uiState.update { it.copy(modal = it.modal.copy(error = "Формат даты: 2026-06-05 12:00")) }
+            return
+        }
+        _uiState.update { it.copy(modal = it.modal.copy(submitting = true, error = null)) }
+        val status = if (m.completed) "completed" else "planned"
+        val completedAt = if (m.completed) isoDate else null
+        viewModelScope.launch {
+            repository.createSession(
+                studentId = id,
+                goalId = m.goalId,
+                scheduledAt = isoDate,
+                completedAt = completedAt,
+                trainerNotes = m.trainerNotes,
+                status = status,
+            ).onSuccess {
+                _uiState.update { it.copy(modal = CreateSessionModalState()) }
+                refresh()
+            }.onFailure { e ->
+                _uiState.update { it.copy(modal = it.modal.copy(submitting = false, error = mapError(e))) }
+            }
+        }
+    }
+
+    private fun parseDate(input: String): String? = runCatching {
+        val ldt = LocalDateTime.parse(input.trim(), DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm"))
+        ldt.atOffset(ZoneOffset.UTC).format(DateTimeFormatter.ISO_OFFSET_DATE_TIME)
+    }.getOrNull()
 
     private fun mapError(e: Throwable): String =
         e.message?.takeIf { it.isNotBlank() } ?: "Что-то пошло не так. Попробуйте снова."

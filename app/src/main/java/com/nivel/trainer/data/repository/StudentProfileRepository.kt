@@ -1,5 +1,6 @@
 package com.nivel.trainer.data.repository
 
+import com.nivel.trainer.data.remote.CreateSessionForStudentRequest
 import com.nivel.trainer.data.remote.NivelApi
 import com.nivel.trainer.data.toDomain
 import com.nivel.trainer.domain.StudentProfile
@@ -18,6 +19,14 @@ import javax.inject.Singleton
  */
 interface StudentProfileRepository {
     suspend fun getProfile(studentId: String): Result<StudentProfile>
+    suspend fun createSession(
+        studentId: String,
+        goalId: String,
+        scheduledAt: String?,
+        completedAt: String?,
+        trainerNotes: String?,
+        status: String?,
+    ): Result<String>
 }
 
 @Singleton
@@ -35,5 +44,25 @@ class DefaultStudentProfileRepository @Inject constructor(
             val detail = detailDeferred.await()
             detail.toDomain(planDeferred.await())
         }
+    }
+
+    override suspend fun createSession(
+        studentId: String,
+        goalId: String,
+        scheduledAt: String?,
+        completedAt: String?,
+        trainerNotes: String?,
+        status: String?,
+    ): Result<String> = runCatching {
+        api.createSessionForStudent(
+            CreateSessionForStudentRequest(
+                studentId = studentId,
+                goalId = goalId,
+                scheduledAt = scheduledAt,
+                completedAt = completedAt,
+                trainerNotes = trainerNotes?.takeIf { it.isNotBlank() },
+                status = status,
+            )
+        ).sessionId
     }
 }

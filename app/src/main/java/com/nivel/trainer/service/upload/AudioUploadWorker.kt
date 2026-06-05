@@ -10,6 +10,7 @@ import androidx.hilt.work.HiltWorker
 import androidx.work.CoroutineWorker
 import androidx.work.ForegroundInfo
 import androidx.work.WorkerParameters
+import androidx.work.workDataOf
 import com.nivel.trainer.R
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
@@ -44,13 +45,26 @@ class AudioUploadWorker @AssistedInject constructor(
         // откажет (например, нет POST_NOTIFICATIONS) — продолжаем как обычный воркер.
         runCatching { setForeground(foregroundInfo()) }
 
-        return when (val outcome = repository.upload(sessionId, filePath)) {
+        // Стартовый прогресс: 0 % (фаза «заливка»). По мере PUT обновляем — экран
+        // статусов (C5) читает его из WorkInfo.progress и рисует прогресс-бар.
+        runCatching { setProgress(progressData(0)) }
+
+        val outcome = repository.upload(sessionId, filePath) { fraction ->
+            // Колбэк прогресса заливки. setProgress асинхронный (suspend) — но мы уже
+            // в корутине doWork; ошибки публикации прогресса не должны ронять заливку.
+            runCatching { setProgressAsync(progressData((fraction * 100).toInt())) }
+        }
+
+        return when (outcome) {
             is UploadOutcome.Success -> Result.success()
             is UploadOutcome.PermanentFailure -> Result.failure()
             is UploadOutcome.Retry ->
                 if (runAttemptCount >= MAX_ATTEMPTS) Result.failure() else Result.retry()
         }
     }
+
+    private fun progressData(percent: Int) =
+        workDataOf(KEY_PROGRESS to percent.coerceIn(0, 100))
 
     private fun foregroundInfo(): ForegroundInfo {
         ensureChannel()
@@ -87,6 +101,9 @@ class AudioUploadWorker @AssistedInject constructor(
     companion object {
         const val KEY_SESSION_ID = "session_id"
         const val KEY_FILE_PATH = "file_path"
+
+        /** Прогресс заливки 0..100 % в [androidx.work.WorkInfo.getProgress] (C4→C5). */
+        const val KEY_PROGRESS = "progress_percent"
 
         private const val MAX_ATTEMPTS = 5
         private const val CHANNEL_ID = "upload"

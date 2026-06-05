@@ -9,7 +9,6 @@ import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
-import okhttp3.RequestBody.Companion.asRequestBody
 import retrofit2.HttpException
 import java.io.File
 import java.io.IOException
@@ -21,8 +20,15 @@ sealed interface UploadOutcome {
     data object Success : UploadOutcome
     /** Временный сбой (сеть / 5xx) — имеет смысл повторить через backoff. */
     data class Retry(val reason: String) : UploadOutcome
-    /** Постоянный сбой (нет файла / 4xx) — повтор бесполезен. */
-    data class PermanentFailure(val reason: String) : UploadOutcome
+    /**
+     * Постоянный сбой (нет файла / 4xx) — повтор бесполезен.
+     * [expiredUrl] = true для частного случая 400/403 на signed-URL (протухший TTL):
+     * сам PUT повторять смысла нет, но перезапрос свежего URL может помочь (C4).
+     */
+    data class PermanentFailure(
+        val reason: String,
+        val expiredUrl: Boolean = false,
+    ) : UploadOutcome
 }
 
 /**
@@ -43,28 +49,41 @@ class AudioUploadRepository @Inject constructor(
     @UploadClient private val uploadClient: OkHttpClient,
 ) {
 
-    suspend fun upload(sessionId: String, filePath: String): UploadOutcome {
+    /**
+     * Один проход конвейера (C3 + устойчивость C4, #13).
+     *
+     * [onProgress] — доля выгрузки `0f..1f` для прогресс-бара экрана статусов (C5);
+     * по умолчанию no-op (когда прогресс не нужен, напр. в тестах).
+     *
+     * Устойчивость (C4):
+     *  - **Хранение до подтверждения:** локальный файл удаляется ТОЛЬКО после
+     *    подтверждённого `…/transcribe` (HTTP 200). Любой обрыв/перезапуск оставляет
+     *    файл на диске — WorkManager повторит заливку (backoff), запись не теряется.
+     *  - **Refresh TTL:** signed upload URL живёт ограниченно; если Supabase отверг
+     *    PUT как протухший (400/403), перезапрашиваем свежий URL и повторяем PUT
+     *    один раз в этой же попытке (см. [putWithTtlRefresh]). Это покрывает кейс,
+     *    когда заливка стартовала спустя долгий backoff после выдачи URL.
+     */
+    suspend fun upload(
+        sessionId: String,
+        filePath: String,
+        onProgress: (Float) -> Unit = {},
+    ): UploadOutcome {
         val file = File(filePath)
         if (!file.exists() || file.length() == 0L) {
             return UploadOutcome.PermanentFailure("Файл записи не найден или пуст: $filePath")
         }
         val ext = file.extension.ifBlank { "m4a" }
 
-        // 1. signed upload URL (наш API).
-        val urlResp = try {
-            api.requestUploadUrl(sessionId, UploadUrlRequest(ext = ext))
-        } catch (e: HttpException) {
-            return httpToOutcome(e, "upload-url")
-        } catch (e: IOException) {
-            return UploadOutcome.Retry("Сеть (upload-url): ${e.message}")
+        // 1–2. signed upload URL + PUT файла с автоперезапросом URL при протухшем TTL.
+        val storagePath = when (val r = putWithTtlRefresh(sessionId, file, ext, onProgress)) {
+            is PutResult.Failure -> return r.outcome
+            is PutResult.Uploaded -> r.storagePath
         }
-
-        // 2. PUT файла напрямую на Supabase signed-URL (без нашего bearer).
-        putFile(urlResp.uploadUrl, file, ext)?.let { return it }
 
         // 3. запуск расшифровки (наш API).
         try {
-            api.transcribe(sessionId, TranscribeRequest(storagePath = urlResp.storagePath))
+            api.transcribe(sessionId, TranscribeRequest(storagePath = storagePath))
         } catch (e: HttpException) {
             // 502 = STT провалился (часто детерминированно: битый/неподдерживаемый
             // звук). Повтор = заново upload-url + PUT всего файла, а STT упадёт так же
@@ -75,26 +94,78 @@ class AudioUploadRepository @Inject constructor(
             return UploadOutcome.Retry("Сеть (transcribe): ${e.message}")
         }
 
-        // Подтверждённый успех — локальный файл больше не нужен. C4 расширит
-        // политику хранения/докачки/refresh TTL; здесь удаляем после подтверждения.
+        // Подтверждённый успех (C4) — только теперь локальный файл можно удалить.
         runCatching { file.delete() }
         return UploadOutcome.Success
     }
 
+    /** Результат фазы «получить URL + залить файл». */
+    private sealed interface PutResult {
+        data class Uploaded(val storagePath: String) : PutResult
+        data class Failure(val outcome: UploadOutcome) : PutResult
+    }
+
+    /**
+     * upload-url → PUT, с одним перезапросом свежего signed-URL при истёкшем TTL (C4).
+     *
+     * signed-URL одноразовый под конкретный storagePath: каждый перезапрос даёт новый
+     * путь, поэтому storagePath для последующего transcribe берём из УСПЕШНО
+     * использованного URL.
+     */
+    private suspend fun putWithTtlRefresh(
+        sessionId: String,
+        file: File,
+        ext: String,
+        onProgress: (Float) -> Unit,
+    ): PutResult {
+        var attempt = 0
+        while (true) {
+            val urlResp = try {
+                api.requestUploadUrl(sessionId, UploadUrlRequest(ext = ext))
+            } catch (e: HttpException) {
+                return PutResult.Failure(httpToOutcome(e, "upload-url"))
+            } catch (e: IOException) {
+                return PutResult.Failure(UploadOutcome.Retry("Сеть (upload-url): ${e.message}"))
+            }
+
+            when (val put = putFile(urlResp.uploadUrl, file, ext, onProgress)) {
+                null -> return PutResult.Uploaded(urlResp.storagePath)
+                is UploadOutcome.PermanentFailure ->
+                    // Истёкший signed-URL Supabase отдаёт как 400/403 — это НЕ
+                    // постоянный сбой записи: перезапрашиваем URL и пробуем ещё раз.
+                    if (put.expiredUrl && attempt < MAX_TTL_REFRESH) {
+                        attempt++
+                        onProgress(0f) // новый URL ⇒ льём файл заново с нуля
+                    } else {
+                        return PutResult.Failure(put)
+                    }
+                else -> return PutResult.Failure(put)
+            }
+        }
+    }
+
     /** PUT файла на signed-URL. Возвращает не-null исход при сбое, null — успех. */
-    private suspend fun putFile(uploadUrl: String, file: File, ext: String): UploadOutcome? =
+    private suspend fun putFile(
+        uploadUrl: String,
+        file: File,
+        ext: String,
+        onProgress: (Float) -> Unit,
+    ): UploadOutcome? =
         withContext(Dispatchers.IO) {
-            // signed-URL одноразовый под конкретный storagePath (каждый ретрай —
-            // новый путь), поэтому x-upsert не нужен: перезаписывать нечего.
+            val body = ProgressRequestBody(file, contentTypeFor(ext).toMediaType(), onProgress)
             val request = Request.Builder()
                 .url(uploadUrl)
-                .put(file.asRequestBody(contentTypeFor(ext).toMediaType()))
+                .put(body)
                 .build()
             try {
                 uploadClient.newCall(request).execute().use { resp ->
                     when {
                         resp.isSuccessful -> null
                         resp.code in 500..599 -> UploadOutcome.Retry("PUT ${resp.code}")
+                        // 400/403 на signed-URL = протухший/невалидный TTL — даём
+                        // вызывающему шанс перезапросить URL (см. putWithTtlRefresh).
+                        resp.code == 400 || resp.code == 403 ->
+                            UploadOutcome.PermanentFailure("PUT ${resp.code}", expiredUrl = true)
                         else -> UploadOutcome.PermanentFailure("PUT ${resp.code}")
                     }
                 }
@@ -115,5 +186,10 @@ class AudioUploadRepository @Inject constructor(
         "ogg" -> "audio/ogg"
         "webm" -> "audio/webm"
         else -> "application/octet-stream"
+    }
+
+    private companion object {
+        /** Сколько раз перезапросить свежий signed-URL при протухшем TTL за одну попытку. */
+        const val MAX_TTL_REFRESH = 1
     }
 }

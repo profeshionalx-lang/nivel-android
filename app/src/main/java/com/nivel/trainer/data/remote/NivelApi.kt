@@ -36,9 +36,13 @@ interface NivelApi {
     @GET("api/v1/students/{studentId}/sessions")
     suspend fun getStudentSessions(@Path("studentId") studentId: String): List<SessionDto>
 
-    // TODO(#A3): подтвердить путь/шейп инсайт-карточек сессии.
-    @GET("api/v1/sessions/{sessionId}/cards")
-    suspend fun getSessionCards(@Path("sessionId") sessionId: String): List<InsightCardDto>
+    /**
+     * Инсайт-карточки сессии (`GET /api/v1/sessions/{id}/insight-cards`).
+     * Обёртка `{ cards }`; карточки упорядочены по position (`getSessionInsightCardsCore`).
+     * Путь/шейп исправлены по реальному route NIVEL (был стаб `…/cards` без обёртки).
+     */
+    @GET("api/v1/sessions/{sessionId}/insight-cards")
+    suspend fun getSessionCards(@Path("sessionId") sessionId: String): SessionInsightCardsResponse
 
     // ---------------------------------------------------------------------------
     // B4 (#7) — создание теневого ученика и приглашение (write A5).
@@ -83,6 +87,25 @@ interface NivelApi {
      */
     @GET("api/v1/students/{studentId}/master-plan")
     suspend fun getStudentMasterPlan(@Path("studentId") studentId: String): MasterPlanResponse
+
+    // ---------------------------------------------------------------------------
+    // B6 (#9) — карточка тренировки (просмотр): детали сессии + статус аудио.
+    // Карточки берутся из исправленного `getSessionCards` (…/insight-cards) выше.
+    // ---------------------------------------------------------------------------
+
+    /**
+     * Детали сессии (`GET /api/v1/sessions/{id}`). Trainer-only, ownership
+     * проверяется сервером; 404 — нет такой сессии у тренера.
+     */
+    @GET("api/v1/sessions/{sessionId}")
+    suspend fun getSessionDetail(@Path("sessionId") sessionId: String): SessionDetailResponse
+
+    /**
+     * Статус обработки аудио (`GET /api/v1/sessions/{id}/transcript/status`):
+     * транскрипция + анализ. 404 — записи/транскрипта ещё нет.
+     */
+    @GET("api/v1/sessions/{sessionId}/transcript/status")
+    suspend fun getSessionTranscriptStatus(@Path("sessionId") sessionId: String): SessionTranscriptStatusResponse
 
     // ---------------------------------------------------------------------------
     // D1 (#19) — транскрипт тренировки (просмотр, выгрузка), read A4.

@@ -11,6 +11,7 @@ import com.nivel.trainer.feature.auth.LoginScreen
 import com.nivel.trainer.feature.auth.SplashScreen
 import com.nivel.trainer.feature.home.HomeScreen
 import com.nivel.trainer.feature.home.StudentsListScreen
+import com.nivel.trainer.feature.session.SessionDetailScreen
 import com.nivel.trainer.feature.student.StudentProfileScreen
 import com.nivel.trainer.feature.transcript.TranscriptScreen
 
@@ -26,8 +27,12 @@ object NivelRoutes {
     const val STUDENT_PROFILE = "students/{$STUDENT_ARG}"
     fun studentProfile(studentId: String) = "students/$studentId"
 
-    /** Транскрипт сессии (D1). Аргумент — id сессии. */
+    /** Карточка тренировки (B6). Аргумент — id сессии. */
     const val SESSION_ARG = "sessionId"
+    const val SESSION_DETAIL = "sessions/{$SESSION_ARG}"
+    fun sessionDetail(sessionId: String) = "sessions/$sessionId"
+
+    /** Транскрипт сессии (D1). Аргумент — id сессии (см. SESSION_ARG). */
     const val TRANSCRIPT = "sessions/{$SESSION_ARG}/transcript"
     fun transcript(sessionId: String) = "sessions/$sessionId/transcript"
 }
@@ -95,8 +100,21 @@ fun NivelNavHost(
             StudentProfileScreen(
                 studentId = studentId,
                 onBack = { navController.popBackStack() },
-                // Карточка тренировки (B6) подключится здесь, когда экран появится.
-                onOpenSession = { /* TODO(#B6): navController.navigate(session card) */ },
+                onOpenSession = { sessionId ->
+                    navController.navigate(NivelRoutes.sessionDetail(sessionId))
+                },
+            )
+        }
+
+        // B6 (#9) — карточка тренировки (просмотр): статус/дата + аудио + карточки.
+        composable(
+            route = NivelRoutes.SESSION_DETAIL,
+            arguments = listOf(navArgument(NivelRoutes.SESSION_ARG) { type = NavType.StringType }),
+        ) { backStackEntry ->
+            val sessionId = backStackEntry.arguments?.getString(NivelRoutes.SESSION_ARG).orEmpty()
+            SessionDetailScreen(
+                sessionId = sessionId,
+                onBack = { navController.popBackStack() },
             )
         }
 

@@ -8,6 +8,7 @@ import com.nivel.trainer.data.remote.InsightCardDto
 import com.nivel.trainer.data.remote.MasterPlanDto
 import com.nivel.trainer.data.remote.MasterPlanItemDto
 import com.nivel.trainer.data.remote.MasterPlanSectionDto
+import com.nivel.trainer.data.remote.ProblemDto
 import com.nivel.trainer.data.remote.SessionDto
 import com.nivel.trainer.data.remote.ShadowStudentResponse
 import com.nivel.trainer.data.remote.StudentDetailResponse
@@ -18,6 +19,7 @@ import com.nivel.trainer.domain.InsightCard
 import com.nivel.trainer.domain.MasterPlan
 import com.nivel.trainer.domain.MasterPlanItem
 import com.nivel.trainer.domain.MasterPlanSection
+import com.nivel.trainer.domain.Problem
 import com.nivel.trainer.domain.ShadowStudent
 import com.nivel.trainer.domain.Student
 import com.nivel.trainer.domain.StudentProfile
@@ -139,6 +141,13 @@ fun GoalDto.toDomain() = Goal(
     customProblem = customProblem,
     status = status,
     createdAt = createdAt,
+)
+
+/** E2 (#25): проблема справочника → доменная модель для пикера при создании цели. */
+fun ProblemDto.toDomain() = Problem(
+    id = id,
+    categoryId = categoryId,
+    name = name,
 )
 
 fun StudentSessionDto.toDomain() = StudentSession(

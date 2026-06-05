@@ -222,3 +222,54 @@ data class MasterPlanItemDto(
     @SerialName("image_url") val imageUrl: String? = null,
     @SerialName("sort_order") val sortOrder: Int = 0,
 )
+
+// -----------------------------------------------------------------------------
+// E2 (#25) — создание цели для ученика (write A5) + справочник проблем (read A3).
+// Добавлено в конец файла, чтобы минимизировать diff в общем DTO.
+// -----------------------------------------------------------------------------
+
+/**
+ * Ответ `GET /api/v1/reference` (A3, `src/app/api/v1/reference/route.ts`).
+ * Локализован по `?lang=ru|en`. Нам для целей нужны только `problems`
+ * (+ категории для группировки); навыки/упражнения здесь не используем,
+ * поэтому в DTO не объявляем (kotlinx игнорирует лишние поля).
+ */
+@Serializable
+data class ReferenceResponse(
+    @SerialName("problem_categories") val problemCategories: List<ProblemCategoryDto> = emptyList(),
+    val problems: List<ProblemDto> = emptyList(),
+)
+
+@Serializable
+data class ProblemCategoryDto(
+    val id: Int,
+    val name: String = "",
+    @SerialName("sort_order") val sortOrder: Int? = null,
+)
+
+@Serializable
+data class ProblemDto(
+    val id: Int,
+    @SerialName("category_id") val categoryId: Int,
+    val name: String = "",
+    @SerialName("sort_order") val sortOrder: Int? = null,
+)
+
+/**
+ * Тело `POST /api/v1/students/{id}/goals` (A5, `createGoalForStudentCore`).
+ * Хотя бы одно из полей должно быть задано: либо привязка к проблеме из
+ * справочника (`problemId`), либо свободный текст (`customProblem`) — как в
+ * вебе (`InlineGoalCreator`). Оба поля nullable на сервере.
+ */
+@Serializable
+data class CreateGoalRequest(
+    val problemId: Int? = null,
+    val customProblem: String? = null,
+)
+
+/** Ответ создания цели — `{ ok, goalId }`, 201. */
+@Serializable
+data class CreateGoalResponse(
+    val ok: Boolean = true,
+    val goalId: String? = null,
+)

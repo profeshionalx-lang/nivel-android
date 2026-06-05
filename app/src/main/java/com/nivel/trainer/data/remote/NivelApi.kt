@@ -4,6 +4,7 @@ import retrofit2.http.Body
 import retrofit2.http.GET
 import retrofit2.http.POST
 import retrofit2.http.Path
+import retrofit2.http.Query
 
 /**
  * Retrofit-описание REST API бэкенда Nivel (эндпоинты `api/v1/...`, репо profeshionalx-lang/NIVEL).
@@ -83,4 +84,26 @@ interface NivelApi {
      */
     @GET("api/v1/students/{studentId}/master-plan")
     suspend fun getStudentMasterPlan(@Path("studentId") studentId: String): MasterPlanResponse
+
+    // ---------------------------------------------------------------------------
+    // E2 (#25) — создание цели для ученика: справочник проблем + write-эндпоинт.
+    // ---------------------------------------------------------------------------
+
+    /**
+     * Справочники для составления целей/сессий/карточек (`GET /api/v1/reference`).
+     * Локализация через `?lang=ru|en`. Trainer-only. Для целей берём `problems`.
+     */
+    @GET("api/v1/reference")
+    suspend fun getReference(@Query("lang") lang: String = "ru"): ReferenceResponse
+
+    /**
+     * Создать цель ученику (`POST /api/v1/students/{id}/goals`, 201). Тело
+     * `{ problemId?, customProblem? }` — проблема из справочника и/или свой текст.
+     * Trainer-only; тренер должен владеть учеником. Ответ `{ ok, goalId }`.
+     */
+    @POST("api/v1/students/{studentId}/goals")
+    suspend fun createStudentGoal(
+        @Path("studentId") studentId: String,
+        @Body body: CreateGoalRequest,
+    ): CreateGoalResponse
 }

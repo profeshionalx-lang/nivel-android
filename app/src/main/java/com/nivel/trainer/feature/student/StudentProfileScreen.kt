@@ -14,23 +14,38 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -48,6 +63,7 @@ import com.nivel.trainer.domain.Goal
 import com.nivel.trainer.domain.MasterPlan
 import com.nivel.trainer.domain.MasterPlanItem
 import com.nivel.trainer.domain.MasterPlanSection
+import com.nivel.trainer.domain.Problem
 import com.nivel.trainer.domain.StudentProfile
 import com.nivel.trainer.domain.StudentSession
 import com.nivel.trainer.ui.theme.NivelTheme
@@ -97,9 +113,15 @@ fun StudentProfileScreen(
         loading = state.loading,
         error = state.error,
         profile = state.profile,
+        goalCreator = state.goalCreator,
         onBack = onBack,
         onOpenSession = onOpenSession,
         onRetry = viewModel::refresh,
+        onAddGoal = viewModel::openGoalCreator,
+        onDismissGoalCreator = viewModel::dismissGoalCreator,
+        onCustomProblemChange = viewModel::onCustomProblemChange,
+        onSelectProblem = viewModel::onSelectProblem,
+        onSubmitGoal = viewModel::submitGoal,
         modifier = modifier,
     )
 }
@@ -109,9 +131,15 @@ private fun StudentProfileContent(
     loading: Boolean,
     error: String?,
     profile: StudentProfile?,
+    goalCreator: GoalCreatorState,
     onBack: () -> Unit,
     onOpenSession: (String) -> Unit,
     onRetry: () -> Unit,
+    onAddGoal: () -> Unit,
+    onDismissGoalCreator: () -> Unit,
+    onCustomProblemChange: (String) -> Unit,
+    onSelectProblem: (Int?) -> Unit,
+    onSubmitGoal: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -126,10 +154,25 @@ private fun StudentProfileContent(
 
             error != null && profile == null -> CenterBox { ErrorState(error, onRetry) }
 
-            profile != null -> ProfileBody(profile = profile, onOpenSession = onOpenSession)
+            profile != null -> ProfileBody(
+                profile = profile,
+                onOpenSession = onOpenSession,
+                onAddGoal = onAddGoal,
+            )
 
             else -> CenterBox { EmptyState() }
         }
+    }
+
+    // Шит создания цели (E2) — оверлей поверх контента, как модалка в вебе.
+    if (goalCreator.visible) {
+        GoalCreatorSheet(
+            state = goalCreator,
+            onDismiss = onDismissGoalCreator,
+            onCustomProblemChange = onCustomProblemChange,
+            onSelectProblem = onSelectProblem,
+            onSubmit = onSubmitGoal,
+        )
     }
 }
 
@@ -159,7 +202,11 @@ private fun Header(onBack: () -> Unit) {
 }
 
 @Composable
-private fun ProfileBody(profile: StudentProfile, onOpenSession: (String) -> Unit) {
+private fun ProfileBody(
+    profile: StudentProfile,
+    onOpenSession: (String) -> Unit,
+    onAddGoal: () -> Unit,
+) {
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 32.dp),
@@ -169,7 +216,7 @@ private fun ProfileBody(profile: StudentProfile, onOpenSession: (String) -> Unit
         profile.masterPlan?.let { plan ->
             if (plan.sections.isNotEmpty()) item { MasterPlanBlock(plan) }
         }
-        item { GoalsSection(profile.goals) }
+        item { GoalsSection(profile.goals, onAddGoal) }
         item { SessionsSection(profile.sessions, onOpenSession) }
     }
 }
@@ -266,14 +313,47 @@ private fun MasterPlanBlock(plan: MasterPlan) {
     }
 }
 
-/** Секция «Активные цели» — горизонтальная карусель карточек целей. */
+/**
+ * Секция «Активные цели» — горизонтальная карусель карточек целей.
+ * В шапке справа — кнопка «+ Новая» (E2): порт тренерского `InlineGoalCreator`
+ * из веб-`DashboardView` (рядом с заголовком «Активные цели»).
+ */
 @Composable
-private fun GoalsSection(goals: List<Goal>) {
+private fun GoalsSection(goals: List<Goal>, onAddGoal: () -> Unit) {
     Column {
-        SectionTitle("Активные цели")
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            SectionTitle("Активные цели")
+            // «+ Новая» — primary, как в вебе (`text-primary text-xs font-bold uppercase`).
+            Text(
+                text = "+ Новая",
+                color = Primary,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 1.sp,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(8.dp))
+                    .clickable(onClick = onAddGoal)
+                    .heightIn(min = TouchTarget)
+                    .padding(horizontal = 8.dp)
+                    .wrapContentHeight(),
+            )
+        }
         Spacer(Modifier.size(12.dp))
         if (goals.isEmpty()) {
-            EmptySectionHint()
+            // Тренерский empty-state веба: «No goals yet. Click + new to add one.»
+            Text(
+                text = "Целей пока нет. Нажмите «+ Новая», чтобы добавить.",
+                color = OnSurfaceVariant,
+                fontSize = 14.sp,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(SurfaceCard, RoundedCornerShape(16.dp))
+                    .padding(16.dp),
+            )
         } else {
             LazyRow(
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -317,6 +397,186 @@ private fun GoalCard(goal: Goal) {
                 maxLines = 4,
                 overflow = TextOverflow.Ellipsis,
             )
+        }
+    }
+}
+
+// --- E2 (#25): bottom-sheet создания цели (порт веб-`InlineGoalCreator`) ---
+
+/**
+ * Нижний шит создания цели. Один-в-один с веб-модалкой `InlineGoalCreator`:
+ * заголовок «Новая цель», поле свободного текста проблемы и пикер проблемы из
+ * справочника (необязательный), кнопки «Сохранить»/«Отмена». «Сохранить»
+ * активна только если выбрана проблема или введён текст. На мобиле — нативный
+ * `ModalBottomSheet` вместо центрированной модалки (mobile-first гайдлайн).
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun GoalCreatorSheet(
+    state: GoalCreatorState,
+    onDismiss: () -> Unit,
+    onCustomProblemChange: (String) -> Unit,
+    onSelectProblem: (Int?) -> Unit,
+    onSubmit: () -> Unit,
+) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = SurfaceCard,
+        dragHandle = null,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+                .imePadding()
+                .navigationBarsPadding()
+                .padding(horizontal = 24.dp, vertical = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            Text(
+                text = "Новая цель",
+                color = OnSurface,
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Black,
+            )
+
+            // Свободное описание проблемы (textarea в вебе).
+            OutlinedTextField(
+                value = state.customProblem,
+                onValueChange = onCustomProblemChange,
+                modifier = Modifier.fillMaxWidth(),
+                placeholder = {
+                    Text(
+                        "Опишите проблему (или оставьте пустым и выберите из списка)",
+                        color = OnSurfaceVariant.copy(alpha = 0.6f),
+                        fontSize = 14.sp,
+                    )
+                },
+                minLines = 2,
+                enabled = !state.submitting,
+                textStyle = androidx.compose.ui.text.TextStyle(color = OnSurface, fontSize = 14.sp),
+                shape = RoundedCornerShape(12.dp),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = Primary,
+                    unfocusedBorderColor = OnSurfaceVariant.copy(alpha = 0.3f),
+                    cursorColor = Primary,
+                    focusedContainerColor = SurfaceLow,
+                    unfocusedContainerColor = SurfaceLow,
+                ),
+            )
+
+            // Пикер проблемы из справочника (нативный эквивалент <select>).
+            ProblemPicker(state = state, onSelectProblem = onSelectProblem)
+
+            state.error?.let { msg ->
+                Text(text = msg, color = ErrorColor, fontSize = 13.sp)
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                // «Сохранить» — primary, активна только при валидном вводе.
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .heightIn(min = TouchTarget)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(if (state.canSave) Primary else Primary.copy(alpha = 0.4f))
+                        .clickable(enabled = state.canSave, onClick = onSubmit)
+                        .padding(vertical = 14.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        text = if (state.submitting) "Сохранение…" else "Сохранить",
+                        color = OnPrimary,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
+                // «Отмена» — bordered.
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .heightIn(min = TouchTarget)
+                        .clip(RoundedCornerShape(12.dp))
+                        .border(1.dp, OnSurfaceVariant.copy(alpha = 0.3f), RoundedCornerShape(12.dp))
+                        .clickable(enabled = !state.submitting, onClick = onDismiss)
+                        .padding(vertical = 14.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        text = "Отмена",
+                        color = OnSurface,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Пикер проблемы — поле с выпадающим меню (нативный аналог `<select>` веба).
+ * Первый пункт снимает привязку («— Без привязки —»). Пока справочник грузится —
+ * поле неактивно со спиннером; свободный текст всё равно доступен.
+ */
+@Composable
+private fun ProblemPicker(state: GoalCreatorState, onSelectProblem: (Int?) -> Unit) {
+    var expanded by remember { mutableStateOf(false) }
+    val selected = state.problems.firstOrNull { it.id == state.selectedProblemId }
+    val label = selected?.name ?: "— Привязать проблему (необязательно) —"
+    val pickerEnabled = !state.submitting && state.problems.isNotEmpty()
+
+    Box {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = TouchTarget)
+                .clip(RoundedCornerShape(12.dp))
+                .background(SurfaceLow)
+                .border(1.dp, OnSurfaceVariant.copy(alpha = 0.3f), RoundedCornerShape(12.dp))
+                .clickable(enabled = pickerEnabled) { expanded = true }
+                .padding(horizontal = 12.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = if (state.problemsLoading) "Загрузка справочника…" else label,
+                color = if (selected != null) OnSurface else OnSurfaceVariant.copy(alpha = 0.7f),
+                fontSize = 14.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+            if (state.problemsLoading) {
+                CircularProgressIndicator(color = Primary, strokeWidth = 2.dp, modifier = Modifier.size(16.dp))
+            } else {
+                Text("▾", color = OnSurfaceVariant, fontSize = 14.sp)
+            }
+        }
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+        ) {
+            DropdownMenuItem(
+                text = { Text("— Без привязки —", color = OnSurfaceVariant) },
+                onClick = {
+                    onSelectProblem(null)
+                    expanded = false
+                },
+            )
+            state.problems.forEach { problem ->
+                DropdownMenuItem(
+                    text = { Text(problem.name, color = OnSurface) },
+                    onClick = {
+                        onSelectProblem(problem.id)
+                        expanded = false
+                    },
+                )
+            }
         }
     }
 }
@@ -523,9 +783,15 @@ private fun StudentProfilePreview() {
             loading = false,
             error = null,
             profile = previewProfile,
+            goalCreator = GoalCreatorState(),
             onBack = {},
             onOpenSession = {},
             onRetry = {},
+            onAddGoal = {},
+            onDismissGoalCreator = {},
+            onCustomProblemChange = {},
+            onSelectProblem = {},
+            onSubmitGoal = {},
         )
     }
 }
@@ -538,9 +804,15 @@ private fun StudentProfileEmptyPreview() {
             loading = false,
             error = null,
             profile = previewProfile.copy(goals = emptyList(), sessions = emptyList(), masterPlan = null),
+            goalCreator = GoalCreatorState(),
             onBack = {},
             onOpenSession = {},
             onRetry = {},
+            onAddGoal = {},
+            onDismissGoalCreator = {},
+            onCustomProblemChange = {},
+            onSelectProblem = {},
+            onSubmitGoal = {},
         )
     }
 }

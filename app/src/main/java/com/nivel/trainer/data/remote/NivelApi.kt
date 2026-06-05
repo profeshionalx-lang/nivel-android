@@ -1,9 +1,11 @@
 package com.nivel.trainer.data.remote
 
 import retrofit2.http.Body
+import retrofit2.http.DELETE
 import retrofit2.http.GET
 import retrofit2.http.POST
 import retrofit2.http.Path
+import retrofit2.http.Query
 
 /**
  * Retrofit-описание REST API бэкенда Nivel (эндпоинты `api/v1/...`, репо profeshionalx-lang/NIVEL).
@@ -87,6 +89,65 @@ interface NivelApi {
      */
     @GET("api/v1/students/{studentId}/master-plan")
     suspend fun getStudentMasterPlan(@Path("studentId") studentId: String): MasterPlanResponse
+
+    // ---------------------------------------------------------------------------
+    // E2 (#25) — создание цели для ученика: справочник проблем + write-эндпоинт.
+    // ---------------------------------------------------------------------------
+
+    /**
+     * Справочники для составления целей/сессий/карточек (`GET /api/v1/reference`).
+     * Локализация через `?lang=ru|en`. Trainer-only. Для целей берём `problems`.
+     */
+    @GET("api/v1/reference")
+    suspend fun getReference(@Query("lang") lang: String = "ru"): ReferenceResponse
+
+    /**
+     * Создать цель ученику (`POST /api/v1/students/{id}/goals`, 201). Тело
+     * `{ problemId?, customProblem? }` — проблема из справочника и/или свой текст.
+     * Trainer-only; тренер должен владеть учеником. Ответ `{ ok, goalId }`.
+     */
+    @POST("api/v1/students/{studentId}/goals")
+    suspend fun createStudentGoal(
+        @Path("studentId") studentId: String,
+        @Body body: CreateGoalRequest,
+    ): CreateGoalResponse
+
+    // ---------------------------------------------------------------------------
+    // E5 (#28) — редактирование мастер-плана: план, секции, пункты (write A5).
+    // ---------------------------------------------------------------------------
+
+    /** Создать пустой мастер-план ученику (`POST .../master-plan`, 201). */
+    @POST("api/v1/students/{studentId}/master-plan")
+    suspend fun createMasterPlan(@Path("studentId") studentId: String): CreatedResponse
+
+    /** Добавить секцию в план (`POST .../master-plan/sections`, 201). */
+    @POST("api/v1/students/{studentId}/master-plan/sections")
+    suspend fun addMasterPlanSection(
+        @Path("studentId") studentId: String,
+        @Body body: AddMasterPlanSectionRequest,
+    ): CreatedResponse
+
+    /** Удалить секцию (и её пункты каскадом) (`DELETE .../sections/{sectionId}`). */
+    @DELETE("api/v1/students/{studentId}/master-plan/sections/{sectionId}")
+    suspend fun deleteMasterPlanSection(
+        @Path("studentId") studentId: String,
+        @Path("sectionId") sectionId: String,
+    ): OkResponse
+
+    /** Добавить пункт в секцию (`POST .../sections/{sectionId}/items`, 201). */
+    @POST("api/v1/students/{studentId}/master-plan/sections/{sectionId}/items")
+    suspend fun addMasterPlanItem(
+        @Path("studentId") studentId: String,
+        @Path("sectionId") sectionId: String,
+        @Body body: AddMasterPlanItemRequest,
+    ): CreatedResponse
+
+    /** Удалить пункт мастер-плана (`DELETE .../master-plan/items/{itemId}`). */
+    @DELETE("api/v1/students/{studentId}/master-plan/items/{itemId}")
+    suspend fun deleteMasterPlanItem(
+        @Path("studentId") studentId: String,
+        @Path("itemId") itemId: String,
+    ): OkResponse
 
     // ---------------------------------------------------------------------------
     // B6 (#9) — карточка тренировки (просмотр): детали сессии + статус аудио.

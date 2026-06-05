@@ -209,6 +209,90 @@ data class MasterPlanItemDto(
 )
 
 // -----------------------------------------------------------------------------
+// E2 (#25) — создание цели для ученика (write A5) + справочник проблем (read A3).
+// Добавлено в конец файла, чтобы минимизировать diff в общем DTO.
+// -----------------------------------------------------------------------------
+
+/**
+ * Ответ `GET /api/v1/reference` (A3, `src/app/api/v1/reference/route.ts`).
+ * Локализован по `?lang=ru|en`. Нам для целей нужны только `problems`
+ * (+ категории для группировки); навыки/упражнения здесь не используем,
+ * поэтому в DTO не объявляем (kotlinx игнорирует лишние поля).
+ */
+@Serializable
+data class ReferenceResponse(
+    @SerialName("problem_categories") val problemCategories: List<ProblemCategoryDto> = emptyList(),
+    val problems: List<ProblemDto> = emptyList(),
+)
+
+@Serializable
+data class ProblemCategoryDto(
+    val id: Int,
+    val name: String = "",
+    @SerialName("sort_order") val sortOrder: Int? = null,
+)
+
+@Serializable
+data class ProblemDto(
+    val id: Int,
+    @SerialName("category_id") val categoryId: Int,
+    val name: String = "",
+    @SerialName("sort_order") val sortOrder: Int? = null,
+)
+
+/**
+ * Тело `POST /api/v1/students/{id}/goals` (A5, `createGoalForStudentCore`).
+ * Хотя бы одно из полей должно быть задано: либо привязка к проблеме из
+ * справочника (`problemId`), либо свободный текст (`customProblem`) — как в
+ * вебе (`InlineGoalCreator`). Оба поля nullable на сервере.
+ */
+@Serializable
+data class CreateGoalRequest(
+    val problemId: Int? = null,
+    val customProblem: String? = null,
+)
+
+/** Ответ создания цели — `{ ok, goalId }`, 201. */
+@Serializable
+data class CreateGoalResponse(
+    val ok: Boolean = true,
+    val goalId: String? = null,
+)
+
+// -----------------------------------------------------------------------------
+// E5 (#28) — редактирование мастер-плана: создать план, секции и пункты (write A5).
+// Чтение плана уже есть (MasterPlanResponse/MasterPlanDto, B5).
+// -----------------------------------------------------------------------------
+
+/** Общий ответ create-операций мастер-плана — `{ ok, id }`, 201. */
+@Serializable
+data class CreatedResponse(
+    val ok: Boolean = true,
+    val id: String? = null,
+)
+
+/**
+ * Тело `POST /api/v1/students/{id}/master-plan/sections`. `category` ∈
+ * {strength, technique, tactics, custom} (валидируется сервером).
+ */
+@Serializable
+data class AddMasterPlanSectionRequest(
+    val planId: String,
+    val title: String,
+    val category: String,
+    val sortOrder: Int? = null,
+)
+
+/** Тело `POST /api/v1/students/{id}/master-plan/sections/{sectionId}/items`. */
+@Serializable
+data class AddMasterPlanItemRequest(
+    val title: String,
+    val description: String? = null,
+    val imageUrl: String? = null,
+    val sortOrder: Int? = null,
+)
+
+// -----------------------------------------------------------------------------
 // C3 (#12) — аудио-конвейер: signed upload URL + запуск транскрипции (A4).
 // Контракт сверен по route-файлам NIVEL:
 //   POST /api/v1/sessions/{id}/audio/upload-url  { ext? } -> { uploadUrl, storagePath }

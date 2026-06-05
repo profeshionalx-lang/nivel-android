@@ -57,14 +57,20 @@ class AudioUploadWorker @AssistedInject constructor(
 
         return when (outcome) {
             is UploadOutcome.Success -> Result.success()
-            is UploadOutcome.PermanentFailure -> Result.failure()
+            // На провале возвращаем file_path в outputData, чтобы экран статусов (C5)
+            // мог предложить ручной повтор — переenqueue той же сессии и файла.
+            is UploadOutcome.PermanentFailure -> Result.failure(failureData(sessionId, filePath))
             is UploadOutcome.Retry ->
-                if (runAttemptCount >= MAX_ATTEMPTS) Result.failure() else Result.retry()
+                if (runAttemptCount >= MAX_ATTEMPTS) Result.failure(failureData(sessionId, filePath))
+                else Result.retry()
         }
     }
 
     private fun progressData(percent: Int) =
         workDataOf(KEY_PROGRESS to percent.coerceIn(0, 100))
+
+    private fun failureData(sessionId: String, filePath: String) =
+        workDataOf(KEY_SESSION_ID to sessionId, KEY_FILE_PATH to filePath)
 
     private fun foregroundInfo(): ForegroundInfo {
         ensureChannel()

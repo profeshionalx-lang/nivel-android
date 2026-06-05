@@ -25,6 +25,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
@@ -57,6 +58,7 @@ import com.nivel.trainer.domain.InsightCard
 import com.nivel.trainer.domain.SessionAudioStatus
 import com.nivel.trainer.domain.SessionDetail
 import com.nivel.trainer.domain.SessionOverview
+import com.nivel.trainer.service.upload.UploadStage
 import com.nivel.trainer.ui.theme.NivelTheme
 import kotlinx.coroutines.delay
 import java.time.OffsetDateTime
@@ -117,17 +119,34 @@ fun SessionDetailScreen(
         }
     }
 
+    // C5: после успешной заливки строка транскрипта на сервере появляется не мгновенно
+    // (запускается STT). Пока заливка идёт/только что доехала, а транскрипта ещё нет —
+    // поллим, чтобы экран сам перешёл «заливка → расшифровка» без ручного обновления.
+    LaunchedEffect(state.uploadStage, audio == null) {
+        val uploadActive = state.uploadStage is UploadStage.Queued ||
+            state.uploadStage is UploadStage.Uploading ||
+            state.uploadStage is UploadStage.Done
+        if (uploadActive && audio == null) {
+            while (true) {
+                delay(POLL_INTERVAL_MS)
+                viewModel.refresh()
+            }
+        }
+    }
+
     SessionDetailContent(
         loading = state.loading,
         error = state.error,
         overview = state.overview,
         generating = state.generating,
         generateError = state.generateError,
+        uploadStage = state.uploadStage,
         onGenerate = viewModel::generateInsights,
         onOpenPaste = viewModel::openPasteSheet,
         onBack = onBack,
         onRecord = onRecord,
         onRetry = viewModel::refresh,
+        onRetryUpload = viewModel::retryUpload,
         modifier = modifier,
     )
 
@@ -155,9 +174,11 @@ private fun SessionDetailContent(
     modifier: Modifier = Modifier,
     generating: Boolean = false,
     generateError: String? = null,
+    uploadStage: UploadStage = UploadStage.None,
     onGenerate: () -> Unit = {},
     onOpenPaste: () -> Unit = {},
     onRecord: () -> Unit = {},
+    onRetryUpload: () -> Unit = {},
 ) {
     Column(
         modifier = modifier
@@ -175,9 +196,11 @@ private fun SessionDetailContent(
                 overview = overview,
                 generating = generating,
                 generateError = generateError,
+                uploadStage = uploadStage,
                 onGenerate = onGenerate,
                 onOpenPaste = onOpenPaste,
                 onRecord = onRecord,
+                onRetryUpload = onRetryUpload,
             )
 
             else -> CenterBox { EmptyState() }
@@ -218,9 +241,11 @@ private fun SessionBody(
     overview: SessionOverview,
     generating: Boolean,
     generateError: String?,
+    uploadStage: UploadStage,
     onGenerate: () -> Unit,
     onOpenPaste: () -> Unit,
     onRecord: () -> Unit,
+    onRetryUpload: () -> Unit,
 ) {
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -228,7 +253,14 @@ private fun SessionBody(
         verticalArrangement = Arrangement.spacedBy(24.dp),
     ) {
         item { StatusBlock(overview.detail) }
-        item { AudioSection(overview.audio, onRecord = onRecord) }
+        item {
+            AudioSection(
+                audio = overview.audio,
+                uploadStage = uploadStage,
+                onRecord = onRecord,
+                onRetryUpload = onRetryUpload,
+            )
+        }
         item {
             CardsSection(
                 audio = overview.audio,
@@ -268,17 +300,38 @@ private fun StatusBlock(detail: SessionDetail) {
 }
 
 /**
- * Секция аудио/транскрипта (веб, trainer). Когда транскрипта ещё нет (`audio == null`),
- * веб показывает аплоадер файла; нативный эквивалент — кнопка «Записать тренировку»
- * (C2, #11): тренер пишет аудио прямо в приложении вместо заливки файла.
- * Когда транскрипт готов/в процессе/с ошибкой — статусы один-в-один с вебом.
+ * Секция аудио/транскрипта (веб, trainer) + стадии обработки (C5, #14).
+ *
+ * Полный пайплайн «запись → заливка(%) → расшифровка → инсайты»:
+ *  - транскрипта ещё нет (`audio == null`) и идёт заливка ([uploadStage]) — показываем
+ *    стадию заливки: в очереди / прогресс % / ошибка с повтором (C4/C5);
+ *  - транскрипта нет и заливки нет — кнопка «Записать тренировку» (C2, нативный
+ *    эквивалент веб-аплоадера);
+ *  - транскрипт готов/в процессе/с ошибкой — статусы один-в-один с вебом.
+ *
+ * Дальше (анализ → карточки) ведёт секция «Карточки» по `analysisStatus` (B6/D2).
  */
 @Composable
-private fun AudioSection(audio: SessionAudioStatus?, onRecord: () -> Unit = {}) {
+private fun AudioSection(
+    audio: SessionAudioStatus?,
+    uploadStage: UploadStage,
+    onRecord: () -> Unit = {},
+    onRetryUpload: () -> Unit = {},
+) {
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Label("Аудио тренировки")
         when {
-            audio == null -> RecordButton(onRecord)
+            // Сервер ещё не завёл транскрипт — показываем стадию заливки (C5).
+            audio == null -> when (uploadStage) {
+                is UploadStage.Queued ->
+                    StatusCard(glyph = "⏫", title = "Заливка в очереди…", subtitle = "Начнётся при подключении к сети")
+                is UploadStage.Uploading -> UploadProgressCard(uploadStage.percent)
+                is UploadStage.Done ->
+                    StatusCard(glyph = "⏳", title = "Запускаем расшифровку…", subtitle = "Обычно занимает 15–30 сек")
+                is UploadStage.Failed ->
+                    UploadFailedCard(onRetry = onRetryUpload)
+                UploadStage.None -> RecordButton(onRecord)
+            }
             audio.transcriptStatus == "ready" ->
                 StatusCard(glyph = "📄", title = "Транскрипт готов", subtitle = null, accent = Primary)
             audio.transcriptStatus == "processing" ->
@@ -291,6 +344,82 @@ private fun AudioSection(audio: SessionAudioStatus?, onRecord: () -> Unit = {}) 
                     accent = ErrorColor,
                 )
         }
+    }
+}
+
+/** Прогресс заливки записи: бар + «Заливка N %» (C5). Тач-зоны не нужны — статус. */
+@Composable
+private fun UploadProgressCard(percent: Int) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(SurfaceCard, RoundedCornerShape(16.dp))
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text("⏫", fontSize = 16.sp)
+            Text(
+                text = "Заливка записи",
+                color = OnSurface,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.weight(1f),
+            )
+            Text(
+                text = "$percent %",
+                color = Primary,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Black,
+            )
+        }
+        LinearProgressIndicator(
+            progress = { percent / 100f },
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = 6.dp),
+            color = Primary,
+            trackColor = SurfaceLow,
+        )
+        Text(
+            text = "Не закрывайте приложение до конца заливки — оно само доведёт запись до сервера.",
+            color = OnSurfaceVariant,
+            fontSize = 12.sp,
+        )
+    }
+}
+
+/** Ошибка заливки записи с ручным повтором (C5). Кнопка ≥48dp по mobile-first. */
+@Composable
+private fun UploadFailedCard(onRetry: () -> Unit) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(SurfaceCard, RoundedCornerShape(16.dp))
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text("⚠", color = ErrorColor, fontSize = 16.sp)
+            Text(
+                text = "Не удалось залить запись",
+                color = OnSurface,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Bold,
+            )
+        }
+        Text(
+            text = "Запись сохранена на устройстве. Проверьте соединение и повторите.",
+            color = OnSurfaceVariant,
+            fontSize = 12.sp,
+        )
+        PrimaryActionButton(text = "Повторить заливку", onClick = onRetry)
     }
 }
 
@@ -927,6 +1056,25 @@ private fun SessionProcessingEmptyPreview() {
                 audio = SessionAudioStatus("processing", null, "idle", null),
                 cards = emptyList(),
             ),
+            onBack = {},
+            onRetry = {},
+        )
+    }
+}
+
+@Preview(showBackground = true, backgroundColor = 0xFF0E0E0E)
+@Composable
+private fun SessionUploadingPreview() {
+    NivelTheme {
+        SessionDetailContent(
+            loading = false,
+            error = null,
+            overview = SessionOverview(
+                detail = previewDetail.copy(status = "completed"),
+                audio = null,
+                cards = emptyList(),
+            ),
+            uploadStage = UploadStage.Uploading(percent = 42),
             onBack = {},
             onRetry = {},
         )

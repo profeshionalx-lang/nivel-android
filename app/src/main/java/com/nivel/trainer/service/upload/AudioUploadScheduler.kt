@@ -27,7 +27,17 @@ class AudioUploadScheduler @Inject constructor(
     @ApplicationContext private val context: Context,
 ) {
 
-    fun enqueue(sessionId: String, filePath: String) {
+    /**
+     * Поставить заливку в очередь. [policy] по умолчанию [ExistingWorkPolicy.KEEP] —
+     * хэндофф из записи не плодит дублей. Для ручного повтора после провала (C5)
+     * вызывается с [ExistingWorkPolicy.REPLACE] (см. [retry]): прежняя проваленная
+     * работа в уникальной цепочке снимается и заменяется свежей.
+     */
+    fun enqueue(
+        sessionId: String,
+        filePath: String,
+        policy: ExistingWorkPolicy = ExistingWorkPolicy.KEEP,
+    ) {
         val request = OneTimeWorkRequestBuilder<AudioUploadWorker>()
             .setInputData(
                 workDataOf(
@@ -46,14 +56,22 @@ class AudioUploadScheduler @Inject constructor(
 
         WorkManager.getInstance(context).enqueueUniqueWork(
             uniqueName(sessionId),
-            ExistingWorkPolicy.KEEP,
+            policy,
             request,
         )
     }
 
+    /**
+     * Ручной повтор заливки после провала (C5, #14): экран статусов берёт file_path
+     * из outputData проваленного воркера ([AudioUploadWorker.failureData]) и
+     * перезапускает уникальную работу с REPLACE.
+     */
+    fun retry(sessionId: String, filePath: String) =
+        enqueue(sessionId, filePath, ExistingWorkPolicy.REPLACE)
+
     companion object {
         const val TAG = "audio-upload"
         private const val BACKOFF_SECONDS = 30L
-        private fun uniqueName(sessionId: String) = "audio-upload-$sessionId"
+        fun uniqueName(sessionId: String) = "audio-upload-$sessionId"
     }
 }

@@ -51,6 +51,8 @@ object NivelRoutes {
 fun NivelNavHost(
     navController: NavHostController,
     modifier: Modifier = Modifier,
+    authCallbackUri: android.net.Uri? = null,
+    onAuthCallbackConsumed: () -> Unit = {},
 ) {
     NavHost(
         navController = navController,
@@ -78,6 +80,8 @@ fun NivelNavHost(
                         popUpTo(NivelRoutes.LOGIN) { inclusive = true }
                     }
                 },
+                authCallbackUri = authCallbackUri,
+                onAuthCallbackConsumed = onAuthCallbackConsumed,
             )
         }
         composable(NivelRoutes.HOME) {

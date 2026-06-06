@@ -1,5 +1,6 @@
 package com.nivel.trainer.feature.auth
 
+import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.nivel.trainer.data.repository.AuthRepository
@@ -17,16 +18,21 @@ enum class AuthStep {
     /** Кнопки «Войти через Гречку» / «Войти через Google». */
     OPTIONS,
 
-    /** Открыт WebView с флоу Гречки. */
-    GRECHKA_WEBVIEW,
+    /** Вход Гречки открыт в Chrome Custom Tabs; ждём возврат по deep link. */
+    GRECHKA_BROWSER,
 }
 
 data class AuthUiState(
     val step: AuthStep = AuthStep.OPTIONS,
     val loading: Boolean = false,
     val error: String? = null,
-    /** OAuth-state (CSRF [~claim]) для текущей сессии WebView Гречки. */
+    /** OAuth-state (CSRF [~claim]) для текущей сессии входа Гречки. */
     val grechkaState: String = "",
+    /**
+     * Одноразовый запрос на открытие Custom Tabs: непустой state, который экран
+     * должен «потребить» (открыть браузер и вызвать [onGrechkaTabLaunched]).
+     */
+    val launchGrechkaTab: String? = null,
     /** Успешный вход — экран навигирует на home. */
     val loggedIn: Boolean = false,
 )
@@ -46,29 +52,77 @@ class AuthViewModel @Inject constructor(
         claimToken = token?.takeIf { it.isNotBlank() }
     }
 
-    /** Пользователь нажал «Войти через Гречку» — открываем WebView с новым state. */
+    /**
+     * Пользователь нажал «Войти через Гречку» — генерим state и просим экран
+     * открыть Chrome Custom Tabs (см. [launchGrechkaAuth]).
+     */
     fun startGrechkaLogin() {
         val csrf = randomCsrf()
-        // state едет в auth-nivel.html и возвращается в редиректе; claim — внутри state.
+        // state едет в auth-nivel.html и возвращается в deep link; claim — внутри state.
         val state = claimToken?.let { "$csrf~$it" } ?: csrf
         _uiState.update {
-            it.copy(step = AuthStep.GRECHKA_WEBVIEW, grechkaState = state, error = null)
+            it.copy(
+                step = AuthStep.GRECHKA_BROWSER,
+                grechkaState = state,
+                launchGrechkaTab = state,
+                error = null,
+            )
         }
     }
 
-    /** Возврат из WebView к кнопкам (back / отмена). */
-    fun cancelGrechkaLogin() {
-        _uiState.update { it.copy(step = AuthStep.OPTIONS) }
+    /** Экран открыл Custom Tabs — гасим одноразовый запрос, чтобы не открыть дважды. */
+    fun onGrechkaTabLaunched() {
+        _uiState.update { it.copy(launchGrechkaTab = null) }
     }
 
-    /** Перехватили Firebase ID token из редиректа Гречки — меняем на bearer. */
+    /** Не удалось открыть браузер для входа Гречки. */
+    fun onGrechkaTabFailed() {
+        _uiState.update {
+            it.copy(
+                step = AuthStep.OPTIONS,
+                launchGrechkaTab = null,
+                error = "Не удалось открыть браузер для входа.",
+            )
+        }
+    }
+
+    /** Возврат к кнопкам (back / отмена входа через браузер). */
+    fun cancelGrechkaLogin() {
+        _uiState.update { it.copy(step = AuthStep.OPTIONS, launchGrechkaTab = null) }
+    }
+
+    /**
+     * Обработка deep link `nivel://auth/callback?token=...&state=...` — возврата
+     * из Custom Tabs. Сверяем CSRF-state и меняем Firebase ID token на bearer.
+     */
+    fun handleAuthCallback(uri: Uri) {
+        val token = uri.getQueryParameter("token")
+        val returnedState = uri.getQueryParameter("state")
+
+        // Гречка возвращает state как `csrf` или `csrf~claim`; сверяем csrf-часть.
+        val returnedCsrf = returnedState?.substringBefore("~")
+        val expectedCsrf = _uiState.value.grechkaState.substringBefore("~")
+
+        when {
+            expectedCsrf.isBlank() ->
+                // Нет ожидаемого state — мы не инициировали этот вход. Игнорируем
+                // (защита от подсунутого извне deep link).
+                _uiState.update { it.copy(step = AuthStep.OPTIONS) }
+            token.isNullOrBlank() ->
+                _uiState.update {
+                    it.copy(step = AuthStep.OPTIONS, error = "Не удалось получить токен от Гречки.")
+                }
+            returnedCsrf != expectedCsrf ->
+                _uiState.update {
+                    it.copy(step = AuthStep.OPTIONS, error = "Сессия истекла, попробуйте ещё раз.")
+                }
+            else -> onFirebaseIdToken(token)
+        }
+    }
+
+    /** Перехватили Firebase ID token из deep link Гречки — меняем на bearer. */
     fun onFirebaseIdToken(idToken: String) {
         exchange(idToken)
-    }
-
-    /** Ошибка внутри WebView Гречки. */
-    fun onGrechkaError(message: String) {
-        _uiState.update { it.copy(step = AuthStep.OPTIONS, loading = false, error = message) }
     }
 
     /**

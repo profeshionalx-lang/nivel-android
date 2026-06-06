@@ -1,6 +1,7 @@
 package com.nivel.trainer.data.repository
 
 import com.nivel.trainer.data.remote.NivelApi
+import com.nivel.trainer.data.remote.ReviewCompleteRequest
 import com.nivel.trainer.data.toDomain
 import com.nivel.trainer.domain.SessionOverview
 import kotlinx.coroutines.async
@@ -21,12 +22,19 @@ import javax.inject.Singleton
  */
 interface SessionDetailRepository {
     suspend fun getOverview(sessionId: String): Result<SessionOverview>
+    /** D5 (#23): зафиксировать финальное ревью тренера и уведомить ученика. */
+    suspend fun completeReview(sessionId: String): Result<Unit>
 }
 
 @Singleton
 class DefaultSessionDetailRepository @Inject constructor(
     private val api: NivelApi,
 ) : SessionDetailRepository {
+
+    override suspend fun completeReview(sessionId: String): Result<Unit> = runCatching {
+        api.completeReview(sessionId, ReviewCompleteRequest(completed = true))
+        Unit
+    }
 
     override suspend fun getOverview(sessionId: String): Result<SessionOverview> = runCatching {
         coroutineScope {

@@ -212,4 +212,20 @@ interface NivelApi {
      */
     @GET("api/v1/sessions/{sessionId}/transcript")
     suspend fun getTranscript(@Path("sessionId") sessionId: String): TranscriptResponse
+
+    // ---------------------------------------------------------------------------
+    // D5 (#23) — завершить разбор тренировки: фиксируем ревью и уведомляем ученика.
+    // ---------------------------------------------------------------------------
+
+    /**
+     * Завершить разбор тренировки (`POST /api/v1/sessions/{id}/review-complete`).
+     * Атомарный guard на сервере: повторный вызов когда `trainer_review_completed=true`
+     * — no-op (zero affected rows), ответ всё равно `{ ok: true }`.
+     * Уведомление ученику (Telegram) отправляется сервером при переходе false→true.
+     */
+    @POST("api/v1/sessions/{sessionId}/review-complete")
+    suspend fun completeReview(
+        @Path("sessionId") sessionId: String,
+        @Body body: ReviewCompleteRequest = ReviewCompleteRequest(),
+    ): OkResponse
 }

@@ -3,6 +3,7 @@ package com.nivel.trainer.data.repository
 import com.nivel.trainer.data.local.ResponseCacheDao
 import com.nivel.trainer.data.local.ResponseCacheEntity
 import com.nivel.trainer.domain.Cached
+import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.json.Json
 import javax.inject.Inject
@@ -47,6 +48,8 @@ class JsonResponseCache @Inject constructor(
         write(key, fresh, serializer)
         Cached(fresh, stale = false)
     }.recoverCatching { error ->
+        // Отмена корутины — не сетевой сбой: пробрасываем, не подменяем кэшем.
+        if (error is CancellationException) throw error
         val cached = read(key, serializer) ?: throw error
         Cached(cached, stale = true)
     }

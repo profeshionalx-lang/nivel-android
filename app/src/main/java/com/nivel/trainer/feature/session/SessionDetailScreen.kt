@@ -151,6 +151,7 @@ fun SessionDetailScreen(
         completingReview = state.completingReview,
         completeReviewError = state.completeReviewError,
         reorderedCards = state.reorderedCards,
+        isOffline = state.isOffline,
         onGenerate = viewModel::generateInsights,
         onOpenPaste = viewModel::openPasteSheet,
         onCompleteReview = viewModel::completeReview,
@@ -192,6 +193,7 @@ private fun SessionDetailContent(
     completingReview: Boolean = false,
     completeReviewError: String? = null,
     reorderedCards: List<com.nivel.trainer.domain.InsightCard>? = null,
+    isOffline: Boolean = false,
     onGenerate: () -> Unit = {},
     onOpenPaste: () -> Unit = {},
     onRecord: () -> Unit = {},
@@ -207,6 +209,11 @@ private fun SessionDetailContent(
             .background(Background),
     ) {
         Header(title = headerTitle(overview?.detail), onBack = onBack)
+
+        // G3 (#32): баннер «оффлайн» — показываем когда данные из кэша (нет сети).
+        if (isOffline) {
+            com.nivel.trainer.ui.state.OfflineBanner(onRetry = onRetry)
+        }
 
         when {
             loading && overview == null -> CenterBox { CircularProgressIndicator(color = Primary) }

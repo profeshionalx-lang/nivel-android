@@ -62,6 +62,11 @@ data class SessionDetailUiState(
      * non-null — оптимистично переупорядоченный список (пользователь тащит палец).
      */
     val reorderedCards: List<InsightCard>? = null,
+    /**
+     * G3 (#32): true = данные из Room-кэша (сеть была недоступна).
+     * UI показывает оффлайн-баннер «Показаны данные из кэша».
+     */
+    val isOffline: Boolean = false,
 )
 
 /**
@@ -133,6 +138,7 @@ class SessionDetailViewModel @Inject constructor(
                             overview = overview,
                             error = null,
                             generateError = if (clearGenError) null else it.generateError,
+                            isOffline = overview.isStale, // G3: флаг кэша
                         )
                     }
                 }

@@ -1,0 +1,39 @@
+{
+  "project_info": {
+    "project_number": "746199017331",
+    "project_id": "grechka-6bdb7",
+    "storage_bucket": "grechka-6bdb7.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:746199017331:android:bf9444d96b52a8e3fd4706",
+        "android_client_info": {
+          "package_name": "com.nivel.trainer"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "746199017331-2bs8rr4qa9uii41tdguoorniokqur8e1.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDhZlWCgcOSv7-mF0gA4fBMF9AwzgkZVbA"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "746199017331-2bs8rr4qa9uii41tdguoorniokqur8e1.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

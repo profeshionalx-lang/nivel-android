@@ -7,6 +7,7 @@ import com.nivel.trainer.domain.InviteStatus
 import com.nivel.trainer.domain.Problem
 import com.nivel.trainer.domain.StudentInvite
 import com.nivel.trainer.domain.StudentProfile
+import com.nivel.trainer.ui.state.isNetworkError
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -502,6 +503,9 @@ class StudentProfileViewModel @Inject constructor(
         }
     }
 
-    private fun mapError(e: Throwable): String =
-        e.message?.takeIf { it.isNotBlank() } ?: "Что-то пошло не так. Попробуйте снова."
+    private fun mapError(e: Throwable): String = when {
+        // G3 (#32): сетевую ошибку показываем понятной «нет связи» формулировкой.
+        isNetworkError(e) -> "Нет подключения к интернету. Проверьте сеть и повторите."
+        else -> e.message?.takeIf { it.isNotBlank() } ?: "Что-то пошло не так. Попробуйте снова."
+    }
 }

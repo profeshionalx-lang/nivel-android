@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.room.Room
 import com.nivel.trainer.data.local.InsightCardDao
 import com.nivel.trainer.data.local.NivelDatabase
+import com.nivel.trainer.data.local.ResponseCacheDao
 import com.nivel.trainer.data.local.SessionDao
 import com.nivel.trainer.data.local.StudentDao
 import dagger.Module
@@ -39,4 +40,7 @@ object DatabaseModule {
 
     @Provides
     fun provideInsightCardDao(db: NivelDatabase): InsightCardDao = db.insightCardDao()
+
+    @Provides
+    fun provideResponseCacheDao(db: NivelDatabase): ResponseCacheDao = db.responseCacheDao()
 }

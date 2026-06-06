@@ -8,6 +8,7 @@ import com.nivel.trainer.data.remote.CreateSessionForStudentRequest
 import com.nivel.trainer.data.remote.NivelApi
 import com.nivel.trainer.data.remote.UpdateStudentProfileRequest
 import com.nivel.trainer.data.toDomain
+import com.nivel.trainer.domain.Cached
 import com.nivel.trainer.domain.InviteStatus
 import com.nivel.trainer.domain.Problem
 import com.nivel.trainer.domain.StudentInvite
@@ -22,14 +23,16 @@ import javax.inject.Singleton
  * Просмотр (B5): базовая инфо + цели + сессии + мастер-план + статус приглашения.
  * Управление (E3): правка профиля, перевыпуск/отзыв приглашения.
  *
- * Точечный экран чтения, без Room-кэша: источник правды — сервер. `detail`,
- * `master-plan` и статус приглашения грузятся параллельно; план и приглашение —
- * best-effort (их сбой/отсутствие не роняют профиль).
+ * Точечный экран чтения без собственных Room-entity: источник правды — сервер.
+ * `detail`, `master-plan` и статус приглашения грузятся параллельно; план и
+ * приглашение — best-effort (их сбой/отсутствие не роняют профиль). Оффлайн-чтение
+ * (G3, #32) — через generic [JsonResponseCache]: при сетевом сбое отдаём последний
+ * снимок профиля со `stale=true`.
  *
  * E2 (#25): здесь же справочник проблем и создание цели ученику.
  */
 interface StudentProfileRepository {
-    suspend fun getProfile(studentId: String): Result<StudentProfile>
+    suspend fun getProfile(studentId: String): Result<Cached<StudentProfile>>
 
     /** Правка профиля ученика (имя/аватар). Пустые значения → null. */
     suspend fun updateProfile(studentId: String, fullName: String?, avatarUrl: String?): Result<Unit>
@@ -96,9 +99,11 @@ interface StudentProfileRepository {
 @Singleton
 class DefaultStudentProfileRepository @Inject constructor(
     private val api: NivelApi,
+    private val cache: JsonResponseCache,
 ) : StudentProfileRepository {
 
-    override suspend fun getProfile(studentId: String): Result<StudentProfile> = runCatching {
+    override suspend fun getProfile(studentId: String): Result<Cached<StudentProfile>> =
+        cache.fetch("student_profile:$studentId", StudentProfile.serializer()) {
         coroutineScope {
             val detailDeferred = async { api.getStudentDetail(studentId) }
             // Мастер-план — best-effort: его отсутствие/сбой не должны ронять профиль.

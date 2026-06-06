@@ -56,6 +56,17 @@ interface SessionDao {
 }
 
 @Dao
+interface ResponseCacheDao {
+
+    /** Последний сохранённый ответ по ключу (или null, если кэша ещё нет). */
+    @Query("SELECT * FROM response_cache WHERE `key` = :key LIMIT 1")
+    suspend fun get(key: String): ResponseCacheEntity?
+
+    @Upsert
+    suspend fun upsert(entity: ResponseCacheEntity)
+}
+
+@Dao
 interface InsightCardDao {
 
     @Query("SELECT * FROM insight_cards WHERE sessionId = :sessionId ORDER BY position ASC")

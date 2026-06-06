@@ -66,6 +66,7 @@ import com.nivel.trainer.domain.SessionAudioStatus
 import com.nivel.trainer.domain.SessionDetail
 import com.nivel.trainer.domain.SessionOverview
 import com.nivel.trainer.service.upload.UploadStage
+import com.nivel.trainer.ui.OfflineBanner
 import com.nivel.trainer.ui.theme.NivelTheme
 import kotlinx.coroutines.delay
 import java.time.OffsetDateTime
@@ -114,8 +115,9 @@ fun SessionDetailScreen(
     // вебе). Пока статус idle/processing — поллим результат каждые 3с (как setInterval
     // в InsightsAnalysisStatus), чтобы карточки появились без ручного обновления.
     val audio = state.overview?.audio
-    LaunchedEffect(audio?.transcriptStatus, audio?.analysisStatus, state.generating) {
+    LaunchedEffect(audio?.transcriptStatus, audio?.analysisStatus, state.generating, state.offline) {
         if (!state.generating &&
+            !state.offline && // нет сети — не поллим вхолостую (G3)
             audio?.transcriptStatus == "ready" &&
             (audio.analysisStatus == "idle" || audio.analysisStatus == "processing")
         ) {
@@ -129,11 +131,11 @@ fun SessionDetailScreen(
     // C5: после успешной заливки строка транскрипта на сервере появляется не мгновенно
     // (запускается STT). Пока заливка идёт/только что доехала, а транскрипта ещё нет —
     // поллим, чтобы экран сам перешёл «заливка → расшифровка» без ручного обновления.
-    LaunchedEffect(state.uploadStage, audio == null) {
+    LaunchedEffect(state.uploadStage, audio == null, state.offline) {
         val uploadActive = state.uploadStage is UploadStage.Queued ||
             state.uploadStage is UploadStage.Uploading ||
             state.uploadStage is UploadStage.Done
-        if (uploadActive && audio == null) {
+        if (uploadActive && audio == null && !state.offline) {
             while (true) {
                 delay(POLL_INTERVAL_MS)
                 viewModel.refresh()
@@ -161,6 +163,7 @@ fun SessionDetailScreen(
         onRecord = onRecord,
         onRetry = viewModel::refresh,
         onRetryUpload = viewModel::retryUpload,
+        offline = state.offline,
         modifier = modifier,
     )
 
@@ -200,6 +203,7 @@ private fun SessionDetailContent(
     onDismissCompleteReviewError: () -> Unit = {},
     onMoveCard: (fromIndex: Int, toIndex: Int) -> Unit = { _, _ -> },
     onCardDragEnd: () -> Unit = {},
+    offline: Boolean = false,
 ) {
     Column(
         modifier = modifier
@@ -207,6 +211,7 @@ private fun SessionDetailContent(
             .background(Background),
     ) {
         Header(title = headerTitle(overview?.detail), onBack = onBack)
+        if (offline) OfflineBanner()
 
         when {
             loading && overview == null -> CenterBox { CircularProgressIndicator(color = Primary) }

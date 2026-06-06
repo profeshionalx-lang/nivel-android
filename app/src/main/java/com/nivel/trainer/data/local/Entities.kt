@@ -42,6 +42,20 @@ data class SessionEntity(
     val createdAt: String?,
 )
 
+/**
+ * Универсальный кэш ответов экранов чтения (G3, #32). Хранит сериализованный
+ * JSON последнего успешного ответа под стабильным [key] (например
+ * `student_profile:{id}`), чтобы показывать данные оффлайн без отдельных entity
+ * на каждую вложенную структуру (профиль/overview/транскрипт). Источник правды —
+ * сервер; это лишь снимок последнего ответа.
+ */
+@Entity(tableName = "response_cache")
+data class ResponseCacheEntity(
+    @PrimaryKey val key: String,
+    val json: String,
+    val updatedAt: Long,
+)
+
 @Entity(
     tableName = "insight_cards",
     indices = [Index("sessionId")],

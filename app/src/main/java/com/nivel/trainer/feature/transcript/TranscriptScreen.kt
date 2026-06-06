@@ -54,6 +54,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.nivel.trainer.domain.Transcript
 import com.nivel.trainer.domain.TranscriptSegment
 import com.nivel.trainer.domain.TranscriptStatus
+import com.nivel.trainer.ui.OfflineBanner
 import com.nivel.trainer.ui.theme.NivelTheme
 
 // Цвета один-в-один из веб-Nivel (src/app/globals.css), как на других экранах (B4/B5).
@@ -99,6 +100,7 @@ fun TranscriptScreen(
         loading = state.loading,
         error = state.error,
         transcript = state.transcript,
+        offline = state.offline,
         onBack = onBack,
         onRetry = viewModel::refresh,
         modifier = modifier,
@@ -111,6 +113,7 @@ private fun TranscriptContent(
     loading: Boolean,
     error: String?,
     transcript: Transcript?,
+    offline: Boolean = false,
     onBack: () -> Unit,
     onRetry: () -> Unit,
     modifier: Modifier = Modifier,
@@ -121,6 +124,7 @@ private fun TranscriptContent(
             .background(Background),
     ) {
         Header(onBack = onBack)
+        if (offline) OfflineBanner()
 
         when {
             loading && transcript == null -> CenterBox { CircularProgressIndicator(color = Primary) }

@@ -25,6 +25,8 @@ data class TranscriptUiState(
     val loading: Boolean = true,
     val transcript: Transcript? = null,
     val error: String? = null,
+    /** G3 (#32): показан кэш из-за отсутствия сети — UI рисует оффлайн-индикатор. */
+    val offline: Boolean = false,
 )
 
 /**
@@ -77,11 +79,20 @@ class TranscriptViewModel @Inject constructor(
         }
     }
 
-    /** Один запрос: при успехе кладём транскрипт, при сбое — ошибку (если нет данных). */
-    private suspend fun loadOnce(id: String) {
+    /**
+     * Один запрос. Возвращает `true`, если ответ свежий (сеть), и `false`, если
+     * отдан кэш (оффлайн) или запрос упал без кэша — это сигнал поллингу остановиться.
+     * Репозиторий при сетевом сбое отдаёт последний снимок (`stale=true`); без
+     * кэша — `Result.failure`, тогда показываем ошибку (если данных ещё не было).
+     */
+    private suspend fun loadOnce(id: String): Boolean {
+        var fresh = false
         repository.getTranscript(id)
-            .onSuccess { transcript ->
-                _uiState.update { it.copy(loading = false, transcript = transcript, error = null) }
+            .onSuccess { cached ->
+                fresh = !cached.stale
+                _uiState.update {
+                    it.copy(loading = false, transcript = cached.value, error = null, offline = cached.stale)
+                }
             }
             .onFailure { e ->
                 _uiState.update {
@@ -91,20 +102,19 @@ class TranscriptViewModel @Inject constructor(
                     else it.copy(loading = false)
                 }
             }
+        return fresh
     }
 
     /**
      * Пока статус транскрипта `processing` — перезапрашиваем каждые 3с (как
-     * `setInterval` в вебе). Останавливаемся на `ready`/`failed` или сетевой
-     * ошибке (чтобы не крутить вхолостую — пользователь повторит вручную).
+     * `setInterval` в вебе). Останавливаемся на `ready`/`failed` или когда сеть
+     * недоступна (отдан кэш/ошибка) — чтобы не крутить вхолостую.
      */
     private suspend fun pollWhileProcessing(id: String) {
         while (_uiState.value.transcript?.status == TranscriptStatus.PROCESSING) {
             delay(POLL_INTERVAL_MS)
-            val before = _uiState.value.transcript
-            loadOnce(id)
-            // Сетевой сбой при опросе (статус не изменился, данные остались) — стоп.
-            if (_uiState.value.transcript === before) break
+            val fresh = loadOnce(id)
+            if (!fresh) break
         }
     }
 

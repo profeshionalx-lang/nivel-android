@@ -39,6 +39,8 @@ data class SessionDetailUiState(
     val loading: Boolean = true,
     val overview: SessionOverview? = null,
     val error: String? = null,
+    /** G3 (#32): показан кэш из-за отсутствия сети — UI рисует оффлайн-индикатор. */
+    val offline: Boolean = false,
     /** D2 — шит ручной вставки инсайтов. */
     val pasteSheet: PasteSheetState = PasteSheetState.Closed,
     /** D2 — идёт авто-генерация (LLM инлайн), показываем спиннер-статус. */
@@ -123,7 +125,8 @@ class SessionDetailViewModel @Inject constructor(
         _uiState.update { it.copy(loading = true, error = null) }
         viewModelScope.launch {
             repository.getOverview(id)
-                .onSuccess { overview ->
+                .onSuccess { cached ->
+                    val overview = cached.value
                     // Если сервер уже довёл анализ до ready — снимаем прежнюю ошибку генерации.
                     val clearGenError = overview.audio?.analysisStatus == "ready"
                     _uiState.update {
@@ -131,6 +134,7 @@ class SessionDetailViewModel @Inject constructor(
                             loading = false,
                             overview = overview,
                             error = null,
+                            offline = cached.stale,
                             generateError = if (clearGenError) null else it.generateError,
                         )
                     }

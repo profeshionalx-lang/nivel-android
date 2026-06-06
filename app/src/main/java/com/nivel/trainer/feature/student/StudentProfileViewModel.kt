@@ -47,6 +47,8 @@ data class StudentProfileUiState(
     val loading: Boolean = true,
     val profile: StudentProfile? = null,
     val error: String? = null,
+    /** G3 (#32): показан кэш из-за отсутствия сети — UI рисует оффлайн-индикатор. */
+    val offline: Boolean = false,
     /** E3 — инлайн-правка профиля; null = режим просмотра. */
     val editing: ProfileEditState? = null,
     /** E3 — идёт действие с приглашением (перевыпуск/отзыв). */
@@ -132,8 +134,10 @@ class StudentProfileViewModel @Inject constructor(
         _uiState.update { it.copy(loading = true, error = null) }
         viewModelScope.launch {
             repository.getProfile(id)
-                .onSuccess { profile ->
-                    _uiState.update { it.copy(loading = false, profile = profile, error = null) }
+                .onSuccess { cached ->
+                    _uiState.update {
+                        it.copy(loading = false, profile = cached.value, error = null, offline = cached.stale)
+                    }
                 }
                 .onFailure { e ->
                     _uiState.update { it.copy(loading = false, error = mapError(e)) }

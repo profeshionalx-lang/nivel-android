@@ -78,6 +78,7 @@ import com.nivel.trainer.domain.Problem
 import com.nivel.trainer.domain.StudentInvite
 import com.nivel.trainer.domain.StudentProfile
 import com.nivel.trainer.domain.StudentSession
+import com.nivel.trainer.ui.OfflineBanner
 import com.nivel.trainer.ui.theme.NivelTheme
 import kotlinx.coroutines.delay
 import java.time.OffsetDateTime
@@ -170,6 +171,7 @@ fun StudentProfileScreen(
         onSelectProblem = viewModel::onSelectProblem,
         onRetryProblems = viewModel::retryLoadProblems,
         onSubmitGoal = viewModel::submitGoal,
+        offline = state.offline,
         modifier = modifier,
     )
 
@@ -221,6 +223,7 @@ private fun StudentProfileContent(
     onRegenerate: () -> Unit = {},
     onRevoke: () -> Unit = {},
     onDismissActionError: () -> Unit = {},
+    offline: Boolean = false,
 ) {
     Column(
         modifier = modifier
@@ -228,6 +231,7 @@ private fun StudentProfileContent(
             .background(Background),
     ) {
         Header(onBack = onBack)
+        if (offline) OfflineBanner()
 
         when {
             loading && profile == null -> CenterBox { CircularProgressIndicator(color = Primary) }

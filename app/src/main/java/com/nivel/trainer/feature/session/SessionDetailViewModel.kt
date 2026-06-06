@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.nivel.trainer.data.repository.InsightsRepository
 import com.nivel.trainer.data.repository.InsightsResult
 import com.nivel.trainer.data.repository.SessionDetailRepository
+import com.nivel.trainer.domain.InsightCard
 import com.nivel.trainer.domain.SessionOverview
 import com.nivel.trainer.service.upload.AudioUploadScheduler
 import com.nivel.trainer.service.upload.UploadStage
@@ -54,6 +55,12 @@ data class SessionDetailUiState(
     val completingReview: Boolean = false,
     /** D5 (#23): ошибка завершения разбора (показываем снэкбар/текст). */
     val completeReviewError: String? = null,
+    /**
+     * D4 (#22): текущий локальный порядок карточек во время drag-and-drop.
+     * null — показываем `overview.cards` без изменений.
+     * non-null — оптимистично переупорядоченный список (пользователь тащит палец).
+     */
+    val reorderedCards: List<InsightCard>? = null,
 )
 
 /**
@@ -206,6 +213,44 @@ class SessionDetailViewModel @Inject constructor(
 
     fun dismissCompleteReviewError() {
         _uiState.update { it.copy(completeReviewError = null) }
+    }
+
+    // --- D4: drag-and-drop переупорядочивание карточек ---
+
+    /**
+     * Оптимистично меняет порядок карточек локально во время перетаскивания.
+     * Вызывается из UI на каждый onDragMove с новым индексом целевого элемента.
+     */
+    fun moveCard(fromIndex: Int, toIndex: Int) {
+        val current = _uiState.value.reorderedCards
+            ?: _uiState.value.overview?.cards
+            ?: return
+        if (fromIndex == toIndex) return
+        val mutable = current.toMutableList()
+        val card = mutable.removeAt(fromIndex)
+        mutable.add(toIndex, card)
+        _uiState.update { it.copy(reorderedCards = mutable) }
+    }
+
+    /**
+     * Фиксирует новый порядок на сервере после завершения drag-жеста.
+     * Оптимистичный список уже применён — в случае ошибки сеть перечитаем через refresh().
+     */
+    fun commitCardReorder() {
+        val id = sessionId ?: return
+        val cards = _uiState.value.reorderedCards ?: return
+        val orderedIds = cards.map { it.id }
+        // Применяем reorderedCards в overview сразу, чтобы UI не мигал.
+        val overview = _uiState.value.overview
+        if (overview != null) {
+            _uiState.update { it.copy(overview = overview.copy(cards = cards), reorderedCards = null) }
+        } else {
+            _uiState.update { it.copy(reorderedCards = null) }
+        }
+        viewModelScope.launch {
+            repository.reorderCards(id, orderedIds)
+                .onFailure { refresh() } // при ошибке перечитываем с сервера
+        }
     }
 
     // --- D2: авто-генерация инсайтов ---

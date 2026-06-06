@@ -2,6 +2,7 @@ package com.nivel.trainer.feature.session
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -11,6 +12,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
@@ -20,6 +22,11 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.unit.IntOffset
+import kotlin.math.roundToInt
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -143,10 +150,13 @@ fun SessionDetailScreen(
         uploadStage = state.uploadStage,
         completingReview = state.completingReview,
         completeReviewError = state.completeReviewError,
+        reorderedCards = state.reorderedCards,
         onGenerate = viewModel::generateInsights,
         onOpenPaste = viewModel::openPasteSheet,
         onCompleteReview = viewModel::completeReview,
         onDismissCompleteReviewError = viewModel::dismissCompleteReviewError,
+        onMoveCard = viewModel::moveCard,
+        onCardDragEnd = viewModel::commitCardReorder,
         onBack = onBack,
         onRecord = onRecord,
         onRetry = viewModel::refresh,
@@ -181,12 +191,15 @@ private fun SessionDetailContent(
     uploadStage: UploadStage = UploadStage.None,
     completingReview: Boolean = false,
     completeReviewError: String? = null,
+    reorderedCards: List<com.nivel.trainer.domain.InsightCard>? = null,
     onGenerate: () -> Unit = {},
     onOpenPaste: () -> Unit = {},
     onRecord: () -> Unit = {},
     onRetryUpload: () -> Unit = {},
     onCompleteReview: () -> Unit = {},
     onDismissCompleteReviewError: () -> Unit = {},
+    onMoveCard: (fromIndex: Int, toIndex: Int) -> Unit = { _, _ -> },
+    onCardDragEnd: () -> Unit = {},
 ) {
     Column(
         modifier = modifier
@@ -206,11 +219,14 @@ private fun SessionDetailContent(
                 generateError = generateError,
                 uploadStage = uploadStage,
                 completingReview = completingReview,
+                cards = reorderedCards ?: overview.cards,
                 onGenerate = onGenerate,
                 onOpenPaste = onOpenPaste,
                 onRecord = onRecord,
                 onRetryUpload = onRetryUpload,
                 onCompleteReview = onCompleteReview,
+                onMoveCard = onMoveCard,
+                onCardDragEnd = onCardDragEnd,
             )
 
             else -> CenterBox { EmptyState() }
@@ -261,11 +277,14 @@ private fun SessionBody(
     generateError: String?,
     uploadStage: UploadStage,
     completingReview: Boolean,
+    cards: List<com.nivel.trainer.domain.InsightCard>,
     onGenerate: () -> Unit,
     onOpenPaste: () -> Unit,
     onRecord: () -> Unit,
     onRetryUpload: () -> Unit,
     onCompleteReview: () -> Unit,
+    onMoveCard: (fromIndex: Int, toIndex: Int) -> Unit,
+    onCardDragEnd: () -> Unit,
 ) {
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -284,11 +303,13 @@ private fun SessionBody(
         item {
             CardsSection(
                 audio = overview.audio,
-                cards = overview.cards,
+                cards = cards,
                 generating = generating,
                 generateError = generateError,
                 onGenerate = onGenerate,
                 onOpenPaste = onOpenPaste,
+                onMoveCard = onMoveCard,
+                onCardDragEnd = onCardDragEnd,
             )
         }
         // D5 (#23): кнопка «Завершить разбор» — завершает цикл ревью тренера.
@@ -489,6 +510,10 @@ private fun RecordButton(onClick: () -> Unit) {
 /**
  * Секция «Карточки» (веб, trainer): статус авто-анализа + кнопка вставки инсайтов
  * + черновики + approved. Порядок один-в-один с вебом (`sessions/[id]/page.tsx`).
+ *
+ * D4 (#22): все карточки объединены в единый список с drag-and-drop через
+ * long-press + drag жест. Оптимистичный ребаланс через [onMoveCard];
+ * [onCardDragEnd] фиксирует порядок на сервере.
  */
 @Composable
 private fun CardsSection(
@@ -498,10 +523,9 @@ private fun CardsSection(
     generateError: String?,
     onGenerate: () -> Unit,
     onOpenPaste: () -> Unit,
+    onMoveCard: (fromIndex: Int, toIndex: Int) -> Unit,
+    onCardDragEnd: () -> Unit,
 ) {
-    val drafts = cards.filter { it.trainerStatus == "draft" }
-    val approved = cards.filter { it.trainerStatus == "approved" }
-
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
         Label("Карточки")
 
@@ -519,40 +543,139 @@ private fun CardsSection(
         // Вставить инсайты от Claude — доступно тренеру всегда (как PasteInsightsButton).
         PasteInsightButton(onClick = onOpenPaste)
 
-        if (drafts.isNotEmpty()) {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text(
-                    text = "Черновики (${drafts.size})",
-                    color = Amber,
-                    fontSize = 10.sp,
-                    fontWeight = FontWeight.Black,
-                    letterSpacing = 2.sp,
-                )
-                drafts.forEach { CardView(it) }
-            }
-        }
-
-        if (approved.isNotEmpty()) {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text(
-                    text = "Approved (${approved.size})",
-                    color = OnSurfaceVariant,
-                    fontSize = 10.sp,
-                    fontWeight = FontWeight.Black,
-                    letterSpacing = 2.sp,
-                )
-                approved.forEach { CardView(it) }
-            }
-        }
-
         if (cards.isEmpty()) {
             Text(
                 text = "Карточек пока нет — вставьте инсайты выше.",
                 color = OnSurfaceVariant,
                 fontSize = 14.sp,
             )
+        } else {
+            // D4: drag-and-drop список. Все карточки (черновики + approved) в одном
+            // reorderable Column. Long-press активирует drag; отпускание фиксирует порядок.
+            DraggableCardList(
+                cards = cards,
+                onMoveCard = onMoveCard,
+                onDragEnd = onCardDragEnd,
+            )
         }
     }
+}
+
+/**
+ * D4 (#22): список карточек с drag-and-drop через long-press.
+ *
+ * Подход: каждая карточка отслеживает свою высоту через `onGloballyPositioned`.
+ * При long-press запоминаем `draggedIndex` и накапливаем `dragOffsetY`.
+ * На каждый сдвиг пересчитываем целевой индекс через суммарную высоту карточек.
+ * При отпускании вызываем [onDragEnd].
+ *
+ * Работает без внешних зависимостей (только стандартный Compose gesture API).
+ */
+@Composable
+private fun DraggableCardList(
+    cards: List<InsightCard>,
+    onMoveCard: (fromIndex: Int, toIndex: Int) -> Unit,
+    onDragEnd: () -> Unit,
+) {
+    // Высоты карточек (заполняются в onGloballyPositioned).
+    val cardHeights = remember(cards.size) { mutableListOf<Float>().also { list ->
+        repeat(cards.size) { list.add(0f) }
+    } }
+
+    // Индекс перетаскиваемой карточки (-1 = не тащим).
+    var draggedIndex by remember { mutableStateOf(-1) }
+    // Текущее смещение перетаскиваемой карточки по Y.
+    var dragOffsetY by remember { mutableStateOf(0f) }
+
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        cards.forEachIndexed { index, card ->
+            val isDragged = index == draggedIndex
+            val cardAlpha = if (draggedIndex >= 0 && !isDragged) 0.5f else 1f
+
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .then(
+                        if (isDragged) Modifier.offset { IntOffset(0, dragOffsetY.roundToInt()) }
+                        else Modifier
+                    )
+                    .then(if (isDragged) Modifier.background(SurfaceCard.copy(alpha = 0.95f), RoundedCornerShape(16.dp)) else Modifier)
+                    .onGloballyPositioned { coords ->
+                        if (index < cardHeights.size) cardHeights[index] = coords.size.height.toFloat()
+                    }
+                    .pointerInput(cards) {
+                        detectDragGesturesAfterLongPress(
+                            onDragStart = { _ ->
+                                draggedIndex = index
+                                dragOffsetY = 0f
+                            },
+                            onDrag = { change, dragAmount ->
+                                change.consume()
+                                dragOffsetY += dragAmount.y
+                                // Пересчитываем целевой индекс по накопленному смещению.
+                                val targetIndex = computeTargetIndex(
+                                    fromIndex = draggedIndex,
+                                    offsetY = dragOffsetY,
+                                    heights = cardHeights,
+                                    count = cards.size,
+                                )
+                                if (targetIndex != draggedIndex) {
+                                    onMoveCard(draggedIndex, targetIndex)
+                                    // Корректируем смещение: карточки переставились.
+                                    val heightDiff = if (targetIndex > draggedIndex) {
+                                        -cardHeights.getOrElse(targetIndex) { 0f }
+                                    } else {
+                                        cardHeights.getOrElse(targetIndex) { 0f }
+                                    }
+                                    dragOffsetY += heightDiff
+                                    draggedIndex = targetIndex
+                                }
+                            },
+                            onDragEnd = {
+                                draggedIndex = -1
+                                dragOffsetY = 0f
+                                onDragEnd()
+                            },
+                            onDragCancel = {
+                                draggedIndex = -1
+                                dragOffsetY = 0f
+                            },
+                        )
+                    },
+            ) {
+                DraggableCardView(card = card, isDragged = isDragged, alpha = cardAlpha)
+            }
+        }
+    }
+}
+
+/** Вычисляет целевой индекс по текущему Y-смещению тащимой карточки. */
+private fun computeTargetIndex(
+    fromIndex: Int,
+    offsetY: Float,
+    heights: List<Float>,
+    count: Int,
+): Int {
+    var remaining = offsetY
+    var target = fromIndex
+    if (offsetY > 0) {
+        var i = fromIndex + 1
+        while (i < count && remaining > 0) {
+            val h = heights.getOrElse(i) { 48f } + 12f // gap
+            if (remaining > h / 2) target = i
+            remaining -= h
+            i++
+        }
+    } else {
+        var i = fromIndex - 1
+        while (i >= 0 && remaining < 0) {
+            val h = heights.getOrElse(i) { 48f } + 12f
+            if (remaining < -h / 2) target = i
+            remaining += h
+            i--
+        }
+    }
+    return target.coerceIn(0, count - 1)
 }
 
 /** Карточка инсайта read-only: заголовок + тело + теги. Действия — задачи D2–D4. */
@@ -594,6 +717,80 @@ private fun CardView(card: InsightCard) {
                 }
             }
         }
+    }
+}
+
+/**
+ * D4 (#22): карточка инсайта с визуальной индикацией drag-состояния.
+ * В режиме drag (`isDragged=true`) — слегка приподнята (shadow effect через
+ * background opacity) и полная непрозрачность. Остальные карточки становятся
+ * полупрозрачными ([alpha] < 1.0). Хэндл «⠿» справа намекает на возможность
+ * перетащить. Содержимое идентично [CardView].
+ */
+@Composable
+private fun DraggableCardView(card: InsightCard, isDragged: Boolean, alpha: Float) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .alpha(alpha)
+            .background(
+                if (isDragged) SurfaceElevated else SurfaceCard,
+                RoundedCornerShape(16.dp),
+            )
+            .padding(16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            val heading = card.title?.takeIf { it.isNotBlank() }
+                ?: card.frontText?.takeIf { it.isNotBlank() }
+            heading?.let {
+                Text(
+                    text = it,
+                    color = OnSurface,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Bold,
+                )
+            }
+            card.body?.takeIf { it.isNotBlank() }?.let {
+                Text(text = it, color = OnSurfaceVariant, fontSize = 14.sp)
+            }
+            if (card.tags.isNotEmpty()) {
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    card.tags.forEach { tag ->
+                        Text(
+                            text = tag,
+                            color = Primary,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Black,
+                            letterSpacing = 1.sp,
+                            modifier = Modifier
+                                .background(SurfaceLow, RoundedCornerShape(8.dp))
+                                .padding(horizontal = 8.dp, vertical = 4.dp),
+                        )
+                    }
+                }
+            }
+            // Статус-лейбл (черновик / approved).
+            val statusColor = if (card.trainerStatus == "draft") Amber else OnSurfaceVariant
+            val statusLabel = if (card.trainerStatus == "draft") "ЧЕРНОВИК" else "APPROVED"
+            Text(
+                text = statusLabel,
+                color = statusColor,
+                fontSize = 9.sp,
+                fontWeight = FontWeight.Black,
+                letterSpacing = 1.sp,
+            )
+        }
+        // Drag-хэндл — намёк для пользователя (long-press активирует drag).
+        Text(
+            text = "⠿",
+            color = OnSurfaceVariant.copy(alpha = 0.5f),
+            fontSize = 18.sp,
+        )
     }
 }
 

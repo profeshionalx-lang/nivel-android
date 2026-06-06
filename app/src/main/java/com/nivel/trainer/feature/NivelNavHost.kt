@@ -2,6 +2,7 @@ package com.nivel.trainer.feature
 
 import androidx.compose.ui.Modifier
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.navigation.NavHostController
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
@@ -53,7 +54,25 @@ fun NivelNavHost(
     modifier: Modifier = Modifier,
     authCallbackUri: android.net.Uri? = null,
     onAuthCallbackConsumed: () -> Unit = {},
+    pushDeepLink: android.net.Uri? = null,
+    onPushDeepLinkConsumed: () -> Unit = {},
 ) {
+    // Тап по push-уведомлению: nivel://session/{id} или nivel://student/{id} →
+    // навигируем на соответствующий экран. host=auth обрабатывается отдельно (вход).
+    LaunchedEffect(pushDeepLink) {
+        val uri = pushDeepLink ?: return@LaunchedEffect
+        val id = uri.pathSegments.firstOrNull() ?: uri.lastPathSegment
+        val route = when (uri.host) {
+            "session" -> id?.let { NivelRoutes.sessionDetail(it) }
+            "student" -> id?.let { NivelRoutes.studentProfile(it) }
+            else -> null
+        }
+        if (route != null) {
+            navController.navigate(route)
+        }
+        onPushDeepLinkConsumed()
+    }
+
     NavHost(
         navController = navController,
         startDestination = NivelRoutes.SPLASH,

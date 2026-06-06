@@ -41,8 +41,15 @@ interface SessionDao {
     @Query("SELECT * FROM sessions WHERE studentId = :studentId ORDER BY sessionNumber DESC")
     fun observeByStudent(studentId: String): Flow<List<SessionEntity>>
 
+    /** G3 (#32): единственная сессия по id — для offline-чтения экрана деталей. */
+    @Query("SELECT * FROM sessions WHERE id = :sessionId LIMIT 1")
+    suspend fun getById(sessionId: String): SessionEntity?
+
     @Upsert
     suspend fun upsertAll(sessions: List<SessionEntity>)
+
+    @Upsert
+    suspend fun upsert(session: SessionEntity)
 
     @Query("DELETE FROM sessions WHERE studentId = :studentId")
     suspend fun clearForStudent(studentId: String)
@@ -60,6 +67,10 @@ interface InsightCardDao {
 
     @Query("SELECT * FROM insight_cards WHERE sessionId = :sessionId ORDER BY position ASC")
     fun observeBySession(sessionId: String): Flow<List<InsightCardEntity>>
+
+    /** G3 (#32): разовое чтение карточек из кэша (suspend, не Flow). */
+    @Query("SELECT * FROM insight_cards WHERE sessionId = :sessionId ORDER BY position ASC")
+    suspend fun getBySession(sessionId: String): List<InsightCardEntity>
 
     @Upsert
     suspend fun upsertAll(cards: List<InsightCardEntity>)

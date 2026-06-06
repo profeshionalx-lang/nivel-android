@@ -241,6 +241,36 @@ fun SessionDetailResponse.toDomain() = SessionDetail(
     trainerReviewCompleted = trainerReviewCompleted,
 )
 
+/**
+ * G3 (#32): кэширует детали сессии из API в Room-entity.
+ * studentId — пустая строка (detail-эндпоинт его не возвращает; кэш читается по session id).
+ */
+fun SessionDetailResponse.toEntity() = SessionEntity(
+    id = id,
+    studentId = "",
+    goalId = goalId,
+    sessionNumber = sessionNumber ?: 0,
+    trainerNotes = trainerNotes,
+    studentInsight = null,
+    status = status,
+    trainerReviewCompleted = trainerReviewCompleted,
+    scheduledAt = scheduledAt,
+    completedAt = completedAt,
+    createdAt = null,
+)
+
+/** G3 (#32): восстанавливает [SessionDetail] из кэша (Room) для offline-показа. */
+fun SessionEntity.toSessionDetail() = SessionDetail(
+    id = id,
+    goalId = goalId,
+    sessionNumber = sessionNumber,
+    status = status,
+    trainerNotes = trainerNotes,
+    scheduledAt = scheduledAt,
+    completedAt = completedAt,
+    trainerReviewCompleted = trainerReviewCompleted,
+)
+
 fun SessionTranscriptStatusResponse.toDomain() = SessionAudioStatus(
     transcriptStatus = status,
     transcriptError = errorMessage,

@@ -183,11 +183,15 @@ data class SessionAudioStatus(
 /**
  * Полное состояние экрана карточки тренировки (B6): детали + статус аудио +
  * инсайт-карточки сессии. Карточки — переиспользуем доменный [InsightCard].
+ *
+ * G3 (#32): [isStale]=true означает что данные показываются из Room-кэша
+ * (сеть была недоступна). UI показывает оффлайн-баннер.
  */
 data class SessionOverview(
     val detail: SessionDetail,
     val audio: SessionAudioStatus?,
     val cards: List<InsightCard>,
+    val isStale: Boolean = false,
 )
 
 // --- D1 (#19): транскрипт тренировки (просмотр, выгрузка) ---

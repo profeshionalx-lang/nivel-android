@@ -217,6 +217,21 @@ interface NivelApi {
     // D5 (#23) — завершить разбор тренировки: фиксируем ревью и уведомляем ученика.
     // ---------------------------------------------------------------------------
 
+    // ---------------------------------------------------------------------------
+    // D4 (#22) — переупорядочивание карточек drag-and-drop.
+    // ---------------------------------------------------------------------------
+
+    /**
+     * Переупорядочить карточки тренировки (`POST /api/v1/sessions/{id}/cards/reorder`).
+     * Тело `{ orderedIds: string[] }` — новый порядок карточек. Trainer-only.
+     * Ответ `{ ok: true }`.
+     */
+    @POST("api/v1/sessions/{sessionId}/cards/reorder")
+    suspend fun reorderCards(
+        @Path("sessionId") sessionId: String,
+        @Body body: ReorderCardsRequest,
+    ): OkResponse
+
     /**
      * Завершить разбор тренировки (`POST /api/v1/sessions/{id}/review-complete`).
      * Атомарный guard на сервере: повторный вызов когда `trainer_review_completed=true`

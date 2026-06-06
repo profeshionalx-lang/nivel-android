@@ -406,6 +406,12 @@ data class ReviewCompleteRequest(
     val completed: Boolean = true,
 )
 
+/** Тело `POST /api/v1/sessions/{id}/cards/reorder` (D4). Задаёт новый порядок карточек по id. */
+@Serializable
+data class ReorderCardsRequest(
+    @SerialName("orderedIds") val orderedIds: List<String>,
+)
+
 /**
  * Ответ `GET /api/v1/sessions/{id}/transcript/status` (`getTranscriptStatusCore`):
  * статус транскрипции + анализа. 404 — записи/транскрипта ещё нет.

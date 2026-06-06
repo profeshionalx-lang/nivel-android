@@ -35,7 +35,7 @@
 | Хранение токена | DataStore |
 | Фоновая запись | Foreground Service (`microphone`) + AudioRecord/MediaRecorder |
 | Фоновая заливка | WorkManager (устойчива к обрыву сети и закрытию приложения) |
-| Авторизация | Гречка (WebView, перехват Firebase ID token) + Google Sign-In (fallback) → обмен на bearer-JWT |
+| Авторизация | Гречка (Chrome Custom Tabs + deep link `nivel://auth/callback`, перехват Firebase ID token) + Google Sign-In (fallback) → обмен на bearer-JWT |
 
 ## Сборка и установка APK на телефон (сайдлоад, без Play Store)
 

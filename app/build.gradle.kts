@@ -53,10 +53,12 @@ android {
         // "http://10.0.2.2:3000/" (эмулятор) — потребует cleartext-разрешения в debug.
         buildConfigField("String", "API_BASE_URL", "\"https://nivel-five.vercel.app/\"")
 
-        // Базовый URL Nivel (тот же хост, что API) — для построения redirect_uri
-        // callback'а Гречки, который перехватывает WebView (см. GrechkaWebView).
+        // Базовый URL веб-Nivel (тот же хост, что API) — для построения внешних
+        // ссылок (например, claim-инвайтов). Вход Гречки теперь возвращается на
+        // custom-scheme deep link nivel://auth/callback, а не на этот хост.
         buildConfigField("String", "NIVEL_URL", "\"https://nivel-five.vercel.app\"")
-        // База падел-платформы Гречка: грузим `${GRECHKA_URL}/auth-nivel.html` в WebView.
+        // База падел-платформы Гречка: открываем `${GRECHKA_URL}/auth-nivel.html`
+        // в Chrome Custom Tabs (см. GrechkaCustomTab.launchGrechkaAuth).
         buildConfigField("String", "GRECHKA_URL", "\"https://www.grecha.one\"")
 
         // Нативный Google Sign-In fallback требует google-services.json + SHA-1 из
@@ -118,6 +120,7 @@ ksp {
 dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.core.splashscreen)
+    implementation(libs.androidx.browser)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.lifecycle.viewmodel.compose)

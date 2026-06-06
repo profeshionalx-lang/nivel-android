@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -21,6 +22,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -46,34 +48,51 @@ private val GoogleButtonText = Color(0xFF111827)       // text-gray-900
 /**
  * Экран входа — порт веб-страницы `/login` (`src/app/login/page.tsx`) один-в-один:
  * логотип «Nivel», подпись, кнопка «Войти через Гречку», кнопка «Войти через Google»,
- * строка ошибки, дисклеймер. Неизбежно-нативное: вход Гречки — через [GrechkaWebView]
- * вместо браузерного редиректа; Google — системный Sign-In (fallback).
+ * строка ошибки, дисклеймер. Неизбежно-нативное: вход Гречки — через Chrome Custom
+ * Tabs ([launchGrechkaAuth]) вместо WebView (Google блокирует OAuth в WebView:
+ * `disallowed_useragent` / Error 403); Google — системный Sign-In (fallback).
  *
  * @param onLoggedIn вызывается после успешного сохранения bearer-токена.
  * @param claimToken опциональный токен приглашения (claim-флоу) из deep link.
+ * @param authCallbackUri deep link `nivel://auth/callback?...` из Custom Tabs,
+ *   проброшенный из MainActivity; обрабатывается один раз.
+ * @param onAuthCallbackConsumed вызывается после обработки [authCallbackUri],
+ *   чтобы MainActivity сбросил его и не доставил повторно при recomposition.
  */
 @Composable
 fun LoginScreen(
     onLoggedIn: () -> Unit,
     modifier: Modifier = Modifier,
     claimToken: String? = null,
+    authCallbackUri: android.net.Uri? = null,
+    onAuthCallbackConsumed: () -> Unit = {},
     viewModel: AuthViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val context = LocalContext.current
 
     LaunchedEffect(claimToken) { viewModel.setClaimToken(claimToken) }
     LaunchedEffect(state.loggedIn) { if (state.loggedIn) onLoggedIn() }
 
+    // Одноразовый запрос на открытие Custom Tabs.
+    LaunchedEffect(state.launchGrechkaTab) {
+        val tabState = state.launchGrechkaTab ?: return@LaunchedEffect
+        val opened = launchGrechkaAuth(context, tabState)
+        if (opened) viewModel.onGrechkaTabLaunched() else viewModel.onGrechkaTabFailed()
+    }
+
+    // Доставка deep link из MainActivity в ViewModel.
+    LaunchedEffect(authCallbackUri) {
+        val uri = authCallbackUri ?: return@LaunchedEffect
+        viewModel.handleAuthCallback(uri)
+        onAuthCallbackConsumed()
+    }
+
     when (state.step) {
-        AuthStep.GRECHKA_WEBVIEW -> {
+        AuthStep.GRECHKA_BROWSER -> {
+            // Ждём возврат из браузера; back — отмена входа.
             BackHandler { viewModel.cancelGrechkaLogin() }
-            GrechkaWebView(
-                state = state.grechkaState,
-                claimToken = claimToken,
-                onFirebaseIdToken = viewModel::onFirebaseIdToken,
-                onError = viewModel::onGrechkaError,
-                modifier = modifier,
-            )
+            GrechkaWaiting(modifier = modifier)
         }
 
         AuthStep.OPTIONS -> LoginOptions(
@@ -83,6 +102,30 @@ fun LoginScreen(
             onGoogleClick = { /* TODO(#5): нативный Google Sign-In, см. ниже */ },
             modifier = modifier,
         )
+    }
+}
+
+/** Экран ожидания возврата из Chrome Custom Tabs. */
+@Composable
+private fun GrechkaWaiting(modifier: Modifier = Modifier) {
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .background(LoginBackground),
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(24.dp),
+        ) {
+            CircularProgressIndicator(color = LoginPrimary)
+            Text(
+                text = "Ждём входа через Гречку…",
+                color = LoginOnSurfaceVariant,
+                fontSize = 14.sp,
+                textAlign = TextAlign.Center,
+            )
+        }
     }
 }
 

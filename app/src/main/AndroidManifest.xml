@@ -26,10 +26,26 @@
             android:name=".MainActivity"
             android:exported="true"
             android:label="@string/app_name"
+            android:launchMode="singleTask"
             android:theme="@style/Theme.Nivel.Splash">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+
+            <!-- Deep link возврата из Chrome Custom Tabs после входа через Гречку:
+                 nivel://auth/callback?token=<firebaseIdToken>&state=<csrf[~claim]>.
+                 Заменяет перехват редиректа в WebView (Google блокирует OAuth в WebView:
+                 disallowed_useragent / Error 403). singleTask + onNewIntent доставляют
+                 callback в уже запущенную Activity. -->
+            <intent-filter android:autoVerify="false">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data
+                    android:scheme="nivel"
+                    android:host="auth"
+                    android:path="/callback" />
             </intent-filter>
         </activity>
 

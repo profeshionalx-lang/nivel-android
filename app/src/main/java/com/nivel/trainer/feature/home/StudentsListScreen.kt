@@ -54,6 +54,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.nivel.trainer.domain.ShadowStudent
 import com.nivel.trainer.domain.Student
+import com.nivel.trainer.ui.state.OfflineBanner
 import com.nivel.trainer.ui.theme.NivelTheme
 
 // Цвета взяты один-в-один из веб-Nivel (src/app/globals.css), как и на экране входа (B2).
@@ -95,6 +96,7 @@ fun StudentsListScreen(
         refreshing = state.refreshing,
         error = state.error,
         isEmpty = state.isEmpty,
+        showOfflineBanner = state.showOfflineBanner,
         onOpenStudent = onOpenStudent,
         onClose = onClose,
         onCreateClick = viewModel::openCreateSheet,
@@ -124,6 +126,7 @@ private fun StudentsListContent(
     onCreateClick: () -> Unit,
     onRetry: () -> Unit,
     modifier: Modifier = Modifier,
+    showOfflineBanner: Boolean = false,
 ) {
     Column(
         modifier = modifier
@@ -167,6 +170,11 @@ private fun StudentsListContent(
                     Text("✕", color = OnSurfaceVariant, fontSize = 18.sp, fontWeight = FontWeight.Bold)
                 }
             }
+        }
+
+        // G3 (#32): оффлайн-баннер поверх кэша — сеть упала, но данные есть.
+        if (showOfflineBanner) {
+            OfflineBanner(onRetry = onRetry)
         }
 
         when {
@@ -482,6 +490,24 @@ private fun StudentsListPreview() {
             refreshing = false,
             error = null,
             isEmpty = false,
+            onOpenStudent = {},
+            onClose = {},
+            onCreateClick = {},
+            onRetry = {},
+        )
+    }
+}
+
+@Preview(showBackground = true, backgroundColor = 0xFF0E0E0E)
+@Composable
+private fun StudentsOfflinePreview() {
+    NivelTheme {
+        StudentsListContent(
+            students = previewStudents,
+            refreshing = false,
+            error = null,
+            isEmpty = false,
+            showOfflineBanner = true,
             onOpenStudent = {},
             onClose = {},
             onCreateClick = {},

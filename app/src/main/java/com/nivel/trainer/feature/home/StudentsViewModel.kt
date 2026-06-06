@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.nivel.trainer.data.repository.StudentRepository
 import com.nivel.trainer.domain.ShadowStudent
 import com.nivel.trainer.domain.Student
+import com.nivel.trainer.ui.state.isNetworkError
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -40,11 +41,19 @@ data class StudentsUiState(
     val refreshing: Boolean = false,
     /** Ошибка сетевого обновления (кэш при этом сохраняется). */
     val error: String? = null,
+    /**
+     * G3 (#32): последнее обновление с сервера упало по сети. Если при этом есть кэш —
+     * показываем оффлайн-баннер поверх данных, а не полноэкранную ошибку.
+     */
+    val offline: Boolean = false,
     /** Состояние bottom-sheet создания ученика. */
     val createSheet: CreateSheetState = CreateSheetState.Closed,
 ) {
     /** Истинный empty-state: загрузка завершена, ошибки нет, список пуст. */
     val isEmpty: Boolean get() = students.isEmpty() && !refreshing && error == null
+
+    /** G3: показываем оффлайн-баннер — сеть упала, но кэш есть. */
+    val showOfflineBanner: Boolean get() = offline && students.isNotEmpty()
 }
 
 /**
@@ -70,15 +79,21 @@ class StudentsViewModel @Inject constructor(
         refresh()
     }
 
-    /** Тянет свежий список с сервера; при сбоне кэш остаётся, показываем ошибку. */
+    /**
+     * Тянет свежий список с сервера; при сбое кэш остаётся. Сетевую ошибку (нет связи)
+     * помечаем флагом [StudentsUiState.offline] — UI покажет оффлайн-баннер поверх
+     * кэша вместо полноэкранной ошибки (G3, #32).
+     */
     fun refresh() {
         _uiState.update { it.copy(refreshing = true, error = null) }
         viewModelScope.launch {
             val result = repository.refreshStudents()
+            val failure = result.exceptionOrNull()
             _uiState.update { state ->
                 state.copy(
                     refreshing = false,
-                    error = result.exceptionOrNull()?.let(::mapError),
+                    error = failure?.let(::mapError),
+                    offline = isNetworkError(failure),
                 )
             }
         }

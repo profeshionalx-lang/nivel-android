@@ -396,6 +396,14 @@ data class SessionDetailResponse(
     @SerialName("trainer_notes") val trainerNotes: String? = null,
     @SerialName("scheduled_at") val scheduledAt: String? = null,
     @SerialName("completed_at") val completedAt: String? = null,
+    /** D5 (#23): флаг финального ревью тренера — кнопка «Завершить разбор». */
+    @SerialName("trainer_review_completed") val trainerReviewCompleted: Boolean = false,
+)
+
+/** Тело `POST /api/v1/sessions/{id}/review-complete` (D5). Body необязателен — по умолчанию завершает. */
+@Serializable
+data class ReviewCompleteRequest(
+    val completed: Boolean = true,
 )
 
 /**

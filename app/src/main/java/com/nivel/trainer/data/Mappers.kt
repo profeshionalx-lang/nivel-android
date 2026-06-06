@@ -238,6 +238,7 @@ fun SessionDetailResponse.toDomain() = SessionDetail(
     trainerNotes = trainerNotes,
     scheduledAt = scheduledAt,
     completedAt = completedAt,
+    trainerReviewCompleted = trainerReviewCompleted,
 )
 
 fun SessionTranscriptStatusResponse.toDomain() = SessionAudioStatus(

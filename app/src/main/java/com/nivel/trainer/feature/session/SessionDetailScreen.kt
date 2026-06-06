@@ -141,8 +141,12 @@ fun SessionDetailScreen(
         generating = state.generating,
         generateError = state.generateError,
         uploadStage = state.uploadStage,
+        completingReview = state.completingReview,
+        completeReviewError = state.completeReviewError,
         onGenerate = viewModel::generateInsights,
         onOpenPaste = viewModel::openPasteSheet,
+        onCompleteReview = viewModel::completeReview,
+        onDismissCompleteReviewError = viewModel::dismissCompleteReviewError,
         onBack = onBack,
         onRecord = onRecord,
         onRetry = viewModel::refresh,
@@ -175,10 +179,14 @@ private fun SessionDetailContent(
     generating: Boolean = false,
     generateError: String? = null,
     uploadStage: UploadStage = UploadStage.None,
+    completingReview: Boolean = false,
+    completeReviewError: String? = null,
     onGenerate: () -> Unit = {},
     onOpenPaste: () -> Unit = {},
     onRecord: () -> Unit = {},
     onRetryUpload: () -> Unit = {},
+    onCompleteReview: () -> Unit = {},
+    onDismissCompleteReviewError: () -> Unit = {},
 ) {
     Column(
         modifier = modifier
@@ -197,14 +205,24 @@ private fun SessionDetailContent(
                 generating = generating,
                 generateError = generateError,
                 uploadStage = uploadStage,
+                completingReview = completingReview,
                 onGenerate = onGenerate,
                 onOpenPaste = onOpenPaste,
                 onRecord = onRecord,
                 onRetryUpload = onRetryUpload,
+                onCompleteReview = onCompleteReview,
             )
 
             else -> CenterBox { EmptyState() }
         }
+    }
+
+    // Ошибка завершения разбора — показываем поверх контента (D5).
+    if (completeReviewError != null) {
+        CompleteReviewErrorBanner(
+            message = completeReviewError,
+            onDismiss = onDismissCompleteReviewError,
+        )
     }
 }
 
@@ -242,10 +260,12 @@ private fun SessionBody(
     generating: Boolean,
     generateError: String?,
     uploadStage: UploadStage,
+    completingReview: Boolean,
     onGenerate: () -> Unit,
     onOpenPaste: () -> Unit,
     onRecord: () -> Unit,
     onRetryUpload: () -> Unit,
+    onCompleteReview: () -> Unit,
 ) {
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -269,6 +289,14 @@ private fun SessionBody(
                 generateError = generateError,
                 onGenerate = onGenerate,
                 onOpenPaste = onOpenPaste,
+            )
+        }
+        // D5 (#23): кнопка «Завершить разбор» — завершает цикл ревью тренера.
+        item {
+            CompleteReviewButton(
+                reviewCompleted = overview.detail.trainerReviewCompleted,
+                completing = completingReview,
+                onClick = onCompleteReview,
             )
         }
     }
@@ -963,6 +991,83 @@ private fun ErrorState(message: String, onRetry: () -> Unit) {
 @Composable
 private fun CenterBox(content: @Composable () -> Unit) {
     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { content() }
+}
+
+// --- D5 (#23): завершение разбора ---
+
+/**
+ * Кнопка «Завершить разбор» (D5, #23). Тренер нажимает после того как все карточки
+ * заполнены — сервер атомарно ставит `trainer_review_completed = true` и отправляет
+ * Telegram-уведомление ученику. Повторное нажатие безопасно (сервер идемпотентен).
+ * После завершения превращается в статус-чип «Разбор завершён».
+ */
+@Composable
+private fun CompleteReviewButton(
+    reviewCompleted: Boolean,
+    completing: Boolean,
+    onClick: () -> Unit,
+) {
+    if (reviewCompleted) {
+        // Статус-чип — разбор уже завершён.
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(SurfaceCard, RoundedCornerShape(16.dp))
+                .padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text("✓", color = Primary, fontSize = 16.sp, fontWeight = FontWeight.Black)
+            Text(
+                text = "Разбор завершён — ученик уведомлён",
+                color = Primary,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Bold,
+            )
+        }
+    } else {
+        PrimaryActionButton(
+            text = if (completing) "Отправляем…" else "Завершить разбор",
+            onClick = onClick,
+            enabled = !completing,
+        )
+    }
+}
+
+/**
+ * Баннер-ошибка завершения разбора (D5). Показывается поверх контента (как toast).
+ * Закрывается крестиком. Не блокирует скролл.
+ */
+@Composable
+private fun CompleteReviewErrorBanner(message: String, onDismiss: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(16.dp),
+        contentAlignment = Alignment.BottomCenter,
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(ErrorColor.copy(alpha = 0.9f), RoundedCornerShape(12.dp))
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(
+                text = message,
+                color = Color.White,
+                fontSize = 13.sp,
+                modifier = Modifier.weight(1f),
+            )
+            IconButton(
+                onClick = onDismiss,
+                modifier = Modifier.size(TouchTarget),
+            ) {
+                Text("✕", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+            }
+        }
+    }
 }
 
 // --- Хелперы ---

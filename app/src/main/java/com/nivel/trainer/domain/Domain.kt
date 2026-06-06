@@ -163,6 +163,8 @@ data class SessionDetail(
     val trainerNotes: String?,
     val scheduledAt: String?,
     val completedAt: String?,
+    /** D5 (#23): тренер уже нажал «Завершить разбор» — кнопка показывается как inactive. */
+    val trainerReviewCompleted: Boolean = false,
 )
 
 /**

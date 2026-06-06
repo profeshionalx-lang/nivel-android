@@ -50,6 +50,10 @@ data class SessionDetailUiState(
      * (`overview.audio == null`); дальше пайплайн ведёт статус транскрипта (B6).
      */
     val uploadStage: UploadStage = UploadStage.None,
+    /** D5 (#23): идёт вызов review-complete (блокируем повторный тап). */
+    val completingReview: Boolean = false,
+    /** D5 (#23): ошибка завершения разбора (показываем снэкбар/текст). */
+    val completeReviewError: String? = null,
 )
 
 /**
@@ -170,6 +174,38 @@ class SessionDetailViewModel @Inject constructor(
                 }
             }
         }
+    }
+
+    // --- D5: завершить разбор ---
+
+    /**
+     * Фиксирует финальное ревью тренера (D5, #23). Атомарный guard на сервере:
+     * повторный тап когда `trainerReviewCompleted=true` — безопасный no-op.
+     * При успехе перечитываем обзор — кнопка перейдёт в состояние «уже завершено».
+     */
+    fun completeReview() {
+        val id = sessionId ?: return
+        if (_uiState.value.completingReview) return
+        _uiState.update { it.copy(completingReview = true, completeReviewError = null) }
+        viewModelScope.launch {
+            repository.completeReview(id)
+                .onSuccess {
+                    _uiState.update { it.copy(completingReview = false) }
+                    refresh()
+                }
+                .onFailure { e ->
+                    _uiState.update {
+                        it.copy(
+                            completingReview = false,
+                            completeReviewError = mapError(e),
+                        )
+                    }
+                }
+        }
+    }
+
+    fun dismissCompleteReviewError() {
+        _uiState.update { it.copy(completeReviewError = null) }
     }
 
     // --- D2: авто-генерация инсайтов ---

@@ -517,3 +517,17 @@ data class TranscriptSegmentDto(
     val text: String,
     @SerialName("avg_logprob") val avgLogprob: Double? = null,
 )
+
+// -----------------------------------------------------------------------------
+// G2 (#31) — регистрация FCM-токена устройства для push-уведомлений.
+// -----------------------------------------------------------------------------
+
+/**
+ * Тело `POST /api/v1/devices/token`: FCM-токен устройства + платформа.
+ * Сервер апсертит по (user_id, platform) — один токен на платформу.
+ */
+@Serializable
+data class DeviceTokenRequest(
+    val token: String,
+    val platform: String = "android",
+)

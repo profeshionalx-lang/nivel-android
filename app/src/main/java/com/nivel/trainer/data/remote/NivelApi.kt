@@ -243,4 +243,16 @@ interface NivelApi {
         @Path("sessionId") sessionId: String,
         @Body body: ReviewCompleteRequest = ReviewCompleteRequest(),
     ): OkResponse
+
+    // ---------------------------------------------------------------------------
+    // G2 (#31) — регистрация FCM-токена устройства для серверных push-уведомлений.
+    // ---------------------------------------------------------------------------
+
+    /**
+     * Зарегистрировать (апсертнуть) FCM-токен устройства (`POST /api/v1/devices/token`).
+     * Тело `{ token, platform }`. Bearer-авторизация. Вызывается при получении нового
+     * токена (FirebaseMessagingService.onNewToken) и при старте после логина.
+     */
+    @POST("api/v1/devices/token")
+    suspend fun registerDeviceToken(@Body body: DeviceTokenRequest): OkResponse
 }

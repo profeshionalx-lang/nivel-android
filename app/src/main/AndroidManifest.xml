@@ -63,6 +63,25 @@
             android:foregroundServiceType="dataSync"
             tools:node="merge" />
 
+        <!-- G2 (#31): сервис приёма FCM push-уведомлений. Не экспортируется —
+             вызывается системой через MESSAGING_EVENT. -->
+        <service
+            android:name=".push.NivelFirebaseMessagingService"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.google.firebase.MESSAGING_EVENT" />
+            </intent-filter>
+        </service>
+
+        <!-- G2 (#31): дефолтные иконка и канал для уведомлений, которые система
+             рисует сама из notification-блока пуша, когда приложение в фоне. -->
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_icon"
+            android:resource="@drawable/ic_launcher_monochrome" />
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_channel_id"
+            android:value="nivel_push" />
+
         <!-- C3 (#12): отключаем дефолтную инициализацию WorkManager через App Startup,
              чтобы поднять его on-demand с HiltWorkerFactory (см. NivelApp). -->
         <provider

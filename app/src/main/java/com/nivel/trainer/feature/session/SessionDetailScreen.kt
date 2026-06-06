@@ -2,6 +2,7 @@ package com.nivel.trainer.feature.session
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -35,6 +36,8 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -43,6 +46,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
@@ -52,6 +58,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.zIndex
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.nivel.trainer.domain.InsightCard
@@ -143,10 +150,14 @@ fun SessionDetailScreen(
         uploadStage = state.uploadStage,
         completingReview = state.completingReview,
         completeReviewError = state.completeReviewError,
+        reorderError = state.reorderError,
         onGenerate = viewModel::generateInsights,
         onOpenPaste = viewModel::openPasteSheet,
         onCompleteReview = viewModel::completeReview,
         onDismissCompleteReviewError = viewModel::dismissCompleteReviewError,
+        onReorderMove = viewModel::applyLocalReorder,
+        onReorderCommit = viewModel::persistReorder,
+        onDismissReorderError = viewModel::dismissReorderError,
         onBack = onBack,
         onRecord = onRecord,
         onRetry = viewModel::refresh,
@@ -181,12 +192,16 @@ private fun SessionDetailContent(
     uploadStage: UploadStage = UploadStage.None,
     completingReview: Boolean = false,
     completeReviewError: String? = null,
+    reorderError: String? = null,
     onGenerate: () -> Unit = {},
     onOpenPaste: () -> Unit = {},
     onRecord: () -> Unit = {},
     onRetryUpload: () -> Unit = {},
     onCompleteReview: () -> Unit = {},
     onDismissCompleteReviewError: () -> Unit = {},
+    onReorderMove: (String, String) -> Unit = { _, _ -> },
+    onReorderCommit: (List<String>) -> Unit = {},
+    onDismissReorderError: () -> Unit = {},
 ) {
     Column(
         modifier = modifier
@@ -211,6 +226,8 @@ private fun SessionDetailContent(
                 onRecord = onRecord,
                 onRetryUpload = onRetryUpload,
                 onCompleteReview = onCompleteReview,
+                onReorderMove = onReorderMove,
+                onReorderCommit = onReorderCommit,
             )
 
             else -> CenterBox { EmptyState() }
@@ -222,6 +239,14 @@ private fun SessionDetailContent(
         CompleteReviewErrorBanner(
             message = completeReviewError,
             onDismiss = onDismissCompleteReviewError,
+        )
+    }
+
+    // Ошибка сохранения порядка карточек — снэкбар снизу (D4).
+    if (reorderError != null) {
+        CompleteReviewErrorBanner(
+            message = reorderError,
+            onDismiss = onDismissReorderError,
         )
     }
 }
@@ -266,6 +291,8 @@ private fun SessionBody(
     onRecord: () -> Unit,
     onRetryUpload: () -> Unit,
     onCompleteReview: () -> Unit,
+    onReorderMove: (String, String) -> Unit = { _, _ -> },
+    onReorderCommit: (List<String>) -> Unit = {},
 ) {
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -289,6 +316,8 @@ private fun SessionBody(
                 generateError = generateError,
                 onGenerate = onGenerate,
                 onOpenPaste = onOpenPaste,
+                onReorderMove = onReorderMove,
+                onReorderCommit = onReorderCommit,
             )
         }
         // D5 (#23): кнопка «Завершить разбор» — завершает цикл ревью тренера.
@@ -498,6 +527,8 @@ private fun CardsSection(
     generateError: String?,
     onGenerate: () -> Unit,
     onOpenPaste: () -> Unit,
+    onReorderMove: (String, String) -> Unit = { _, _ -> },
+    onReorderCommit: (List<String>) -> Unit = {},
 ) {
     val drafts = cards.filter { it.trainerStatus == "draft" }
     val approved = cards.filter { it.trainerStatus == "approved" }
@@ -519,6 +550,10 @@ private fun CardsSection(
         // Вставить инсайты от Claude — доступно тренеру всегда (как PasteInsightsButton).
         PasteInsightButton(onClick = onOpenPaste)
 
+        // Полный порядок id (черновики, затем approved) — отправляем целиком на reorder,
+        // чтобы серверный `position` совпал с порядком отображения (D4, #22).
+        val fullOrder = { drafts.map { it.id } + approved.map { it.id } }
+
         if (drafts.isNotEmpty()) {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(
@@ -528,7 +563,19 @@ private fun CardsSection(
                     fontWeight = FontWeight.Black,
                     letterSpacing = 2.sp,
                 )
-                drafts.forEach { CardView(it) }
+                if (drafts.size > 1) {
+                    Text(
+                        text = "Удерживайте карточку и тяните, чтобы изменить порядок",
+                        color = OnSurfaceVariant,
+                        fontSize = 11.sp,
+                    )
+                }
+                DraggableCardColumn(
+                    cards = drafts,
+                    enabled = drafts.size > 1,
+                    onMove = onReorderMove,
+                    onCommit = { onReorderCommit(fullOrder()) },
+                )
             }
         }
 
@@ -541,7 +588,12 @@ private fun CardsSection(
                     fontWeight = FontWeight.Black,
                     letterSpacing = 2.sp,
                 )
-                approved.forEach { CardView(it) }
+                DraggableCardColumn(
+                    cards = approved,
+                    enabled = approved.size > 1,
+                    onMove = onReorderMove,
+                    onCommit = { onReorderCommit(fullOrder()) },
+                )
             }
         }
 
@@ -555,14 +607,127 @@ private fun CardsSection(
     }
 }
 
-/** Карточка инсайта read-only: заголовок + тело + теги. Действия — задачи D2–D4. */
+/**
+ * Колонка карточек с drag-and-drop переупорядочиванием (D4, #22). Перетаскивание
+ * по long-press: при пересечении соседней карточки зовём [onMove] (оптимистичная
+ * перестановка в ViewModel), по отпусканию — [onCommit] (сохранение на сервер).
+ * Mobile-first: жест пальцем, тач-зона всей карточки; пока тянем — карточка
+ * приподнята (elevation/scale) и над соседями (zIndex).
+ *
+ * Карточки невелики (несколько на сессию), поэтому считаем целевой индекс по
+ * измеренным высотам элементов — без LazyColumn-вложенности (мы уже в item родителя).
+ */
 @Composable
-private fun CardView(card: InsightCard) {
-    Column(
-        modifier = Modifier
+private fun DraggableCardColumn(
+    cards: List<InsightCard>,
+    enabled: Boolean,
+    onMove: (String, String) -> Unit,
+    onCommit: () -> Unit,
+) {
+    // Высоты карточек (в px) по id — для расчёта целевого индекса при перетаскивании.
+    val heights = remember { mutableStateMapOf<String, Int>() }
+    var draggingId by remember { mutableStateOf<String?>(null) }
+    var dragOffsetY by remember { mutableStateOf(0f) }
+
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        cards.forEach { card ->
+            key(card.id) {
+                val isDragging = draggingId == card.id
+                CardView(
+                    card = card,
+                    showHandle = enabled,
+                    modifier = Modifier
+                        .onSizeChanged { heights[card.id] = it.height }
+                        .zIndex(if (isDragging) 1f else 0f)
+                        .graphicsLayer {
+                            if (isDragging) {
+                                translationY = dragOffsetY
+                                scaleX = 1.03f
+                                scaleY = 1.03f
+                            }
+                        }
+                        .then(
+                            if (enabled) Modifier.pointerInput(card.id, cards.map { it.id }) {
+                                detectDragGesturesAfterLongPress(
+                                    onDragStart = {
+                                        draggingId = card.id
+                                        dragOffsetY = 0f
+                                    },
+                                    onDragEnd = {
+                                        draggingId = null
+                                        dragOffsetY = 0f
+                                        onCommit()
+                                    },
+                                    onDragCancel = {
+                                        draggingId = null
+                                        dragOffsetY = 0f
+                                    },
+                                    onDrag = { change, drag ->
+                                        change.consume()
+                                        dragOffsetY += drag.y
+                                        val currentIndex = cards.indexOfFirst { it.id == card.id }
+                                        if (currentIndex < 0) return@detectDragGesturesAfterLongPress
+                                        // Тянем вниз: если ушли за половину следующей карточки — меняем местами.
+                                        if (dragOffsetY > 0 && currentIndex < cards.lastIndex) {
+                                            val next = cards[currentIndex + 1]
+                                            val threshold = (heights[next.id] ?: 0) / 2f
+                                            if (dragOffsetY > threshold) {
+                                                onMove(card.id, next.id)
+                                                dragOffsetY -= (heights[next.id] ?: 0).toFloat()
+                                            }
+                                        }
+                                        // Тянем вверх: симметрично с предыдущей карточкой.
+                                        if (dragOffsetY < 0 && currentIndex > 0) {
+                                            val prev = cards[currentIndex - 1]
+                                            val threshold = (heights[prev.id] ?: 0) / 2f
+                                            if (-dragOffsetY > threshold) {
+                                                onMove(card.id, prev.id)
+                                                dragOffsetY += (heights[prev.id] ?: 0).toFloat()
+                                            }
+                                        }
+                                    },
+                                )
+                            } else Modifier,
+                        ),
+                )
+            }
+        }
+    }
+}
+
+/** Карточка инсайта read-only: заголовок + тело + теги (+ ручка перетаскивания, D4). */
+@Composable
+private fun CardView(
+    card: InsightCard,
+    modifier: Modifier = Modifier,
+    showHandle: Boolean = false,
+) {
+    Row(
+        modifier = modifier
             .fillMaxWidth()
             .background(SurfaceCard, RoundedCornerShape(16.dp))
             .padding(16.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        CardContent(card = card, modifier = Modifier.weight(1f))
+        if (showHandle) {
+            // Иконка-ручка (≡) — визуальный аффорданс «можно тянуть». Drag — long-press
+            // по всей карточке, отдельная тач-зона у ручки не требуется (mobile-first).
+            Text(
+                text = "≡",
+                color = OnSurfaceVariant,
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Bold,
+            )
+        }
+    }
+}
+
+/** Содержимое карточки инсайта (заголовок + тело + теги) — вынесено для повторного использования. */
+@Composable
+private fun CardContent(card: InsightCard, modifier: Modifier = Modifier) {
+    Column(
+        modifier = modifier,
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         val heading = card.title?.takeIf { it.isNotBlank() }

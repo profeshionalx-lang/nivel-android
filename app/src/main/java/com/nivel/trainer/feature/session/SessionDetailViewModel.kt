@@ -54,6 +54,10 @@ data class SessionDetailUiState(
     val completingReview: Boolean = false,
     /** D5 (#23): ошибка завершения разбора (показываем снэкбар/текст). */
     val completeReviewError: String? = null,
+    /** D4 (#22): идёт сохранение нового порядка карточек на сервере. */
+    val reorderingCards: Boolean = false,
+    /** D4 (#22): ошибка сохранения порядка (показываем снэкбар, порядок откатываем). */
+    val reorderError: String? = null,
 )
 
 /**
@@ -206,6 +210,58 @@ class SessionDetailViewModel @Inject constructor(
 
     fun dismissCompleteReviewError() {
         _uiState.update { it.copy(completeReviewError = null) }
+    }
+
+    // --- D4: переупорядочивание карточек (drag-and-drop) ---
+
+    /**
+     * Сохраняет новый порядок карточек сессии (D4, #22). UI уже применил перестановку
+     * оптимистично (через [applyLocalReorder]); здесь шлём полный список id по порядку
+     * на сервер (`reorderInsightCardsCore` пишет `position` по индексу). При ошибке —
+     * откат к серверному состоянию через [refresh] и снэкбар с ошибкой.
+     */
+    fun persistReorder(orderedIds: List<String>) {
+        val id = sessionId ?: return
+        if (orderedIds.isEmpty()) return
+        _uiState.update { it.copy(reorderingCards = true, reorderError = null) }
+        viewModelScope.launch {
+            repository.reorderCards(id, orderedIds)
+                .onSuccess {
+                    _uiState.update { it.copy(reorderingCards = false) }
+                    refresh()
+                }
+                .onFailure { e ->
+                    // Откатываем оптимистичный порядок к серверному.
+                    _uiState.update { it.copy(reorderingCards = false, reorderError = mapError(e)) }
+                    refresh()
+                }
+        }
+    }
+
+    /**
+     * Оптимистично переставляет карточку внутри статус-группы (черновики/approved) в
+     * локальном состоянии — без сетевого вызова. Перетаскивание видно мгновенно;
+     * фиксация на сервере — отдельным [persistReorder] по отпусканию пальца.
+     */
+    fun applyLocalReorder(cardId: String, toCardId: String) {
+        if (cardId == toCardId) return
+        _uiState.update { state ->
+            val overview = state.overview ?: return@update state
+            val cards = overview.cards
+            val fromIndex = cards.indexOfFirst { it.id == cardId }
+            val toIndex = cards.indexOfFirst { it.id == toCardId }
+            if (fromIndex < 0 || toIndex < 0) return@update state
+            // Перестановка разрешена только внутри одной статус-группы (как в вебе).
+            if (cards[fromIndex].trainerStatus != cards[toIndex].trainerStatus) return@update state
+            val reordered = cards.toMutableList().apply {
+                add(toIndex, removeAt(fromIndex))
+            }
+            state.copy(overview = overview.copy(cards = reordered))
+        }
+    }
+
+    fun dismissReorderError() {
+        _uiState.update { it.copy(reorderError = null) }
     }
 
     // --- D2: авто-генерация инсайтов ---

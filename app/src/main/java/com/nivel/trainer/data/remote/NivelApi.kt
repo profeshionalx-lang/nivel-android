@@ -228,4 +228,20 @@ interface NivelApi {
         @Path("sessionId") sessionId: String,
         @Body body: ReviewCompleteRequest = ReviewCompleteRequest(),
     ): OkResponse
+
+    // ---------------------------------------------------------------------------
+    // D4 (#22) — переупорядочивание карточек drag-and-drop, сохранение position.
+    // ---------------------------------------------------------------------------
+
+    /**
+     * Сохранить новый порядок карточек сессии (`POST /api/v1/sessions/{id}/cards/reorder`).
+     * Тело — полный список id в нужном порядке; сервер пишет `position` по индексу
+     * (`reorderInsightCardsCore`). Trainer-only, ownership проверяется на сервере.
+     * Ответ `{ ok: true }`.
+     */
+    @POST("api/v1/sessions/{sessionId}/cards/reorder")
+    suspend fun reorderCards(
+        @Path("sessionId") sessionId: String,
+        @Body body: ReorderCardsRequest,
+    ): OkResponse
 }

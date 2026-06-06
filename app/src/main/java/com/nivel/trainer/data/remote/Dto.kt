@@ -407,6 +407,15 @@ data class ReviewCompleteRequest(
 )
 
 /**
+ * Тело `POST /api/v1/sessions/{id}/cards/reorder` (D4, #22). Полный новый порядок
+ * id карточек сессии; сервер пишет `position` по индексу (`reorderInsightCardsCore`).
+ */
+@Serializable
+data class ReorderCardsRequest(
+    @SerialName("orderedIds") val orderedIds: List<String>,
+)
+
+/**
  * Ответ `GET /api/v1/sessions/{id}/transcript/status` (`getTranscriptStatusCore`):
  * статус транскрипции + анализа. 404 — записи/транскрипта ещё нет.
  */

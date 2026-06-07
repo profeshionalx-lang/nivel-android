@@ -252,6 +252,10 @@ interface NivelApi {
     /**
      * Библиотека карточек-шаблонов тренера (`GET /api/v1/cards`): шаблоны (дедуп по
      * template_id, со статистикой решений) + ученики для шита применения. Trainer-only.
+     *
+     * TODO: реальный endpoint NIVEL#200 (PR #201) — на момент написания read-эндпоинт
+     * ещё не влит в main NIVEL; контракт ответа зафиксирован контракт-тестами PR #201.
+     * До мержа вызов вернёт 404 — экран корректно покажет состояние ошибки.
      */
     @GET("api/v1/cards")
     suspend fun getCardLibrary(): CardLibraryResponse
@@ -259,6 +263,9 @@ interface NivelApi {
     /**
      * Коллекции шаблонов тренера (`GET /api/v1/collections`). Обёртка `{ collections }`;
      * у каждой — id шаблонов и счётчик карточек. Trainer-only.
+     *
+     * TODO: реальный endpoint NIVEL#200 (PR #201) — GET-метод добавляется тем же PR;
+     * write-методы (`POST /collections` и т.д.) уже есть. До мержа GET вернёт 404.
      */
     @GET("api/v1/collections")
     suspend fun getCollections(): TrainerCollectionsResponse

@@ -18,13 +18,15 @@ import com.nivel.trainer.ui.theme.NivelTheme
 
 /**
  * Стартовый экран-каркас (B1). Полноценный дашборд тренера — в следующих
- * задачах; пока здесь точка входа на экран «Ученики» (B4).
+ * задачах; пока здесь точки входа на экраны «Ученики» (B4) и «Карточки» (E4).
  *
  * @param onOpenStudents переход на экран списка учеников.
+ * @param onOpenCards переход на библиотеку карточек-шаблонов.
  */
 @Composable
 fun HomeScreen(
     onOpenStudents: () -> Unit = {},
+    onOpenCards: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     Box(
@@ -45,6 +47,13 @@ fun HomeScreen(
                 shape = RoundedCornerShape(12.dp),
             ) {
                 Text("Ученики")
+            }
+            Button(
+                onClick = onOpenCards,
+                modifier = Modifier.heightIn(min = 48.dp),
+                shape = RoundedCornerShape(12.dp),
+            ) {
+                Text("Карточки")
             }
         }
     }

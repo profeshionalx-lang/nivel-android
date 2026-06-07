@@ -519,6 +519,101 @@ data class TranscriptSegmentDto(
 )
 
 // -----------------------------------------------------------------------------
+// E4 (#27) — библиотека карточек-шаблонов и коллекции (read NIVEL#200/PR#201).
+// Контракт зафиксирован контракт-тестами NIVEL (getCardLibraryCore,
+// listTrainerCollectionsCore в src/lib/core/trainerReads.ts). Эталон UI —
+// web trainer/cards/page.tsx + CardsLibrary.tsx. Write-эндпоинты применения и
+// ведения коллекций уже есть (insightCards core). Добавлено в конец файла.
+// -----------------------------------------------------------------------------
+
+/**
+ * Ответ `GET /api/v1/cards` (getCardLibraryCore): шаблоны карточек тренера
+ * (дедуп по template_id) + список учеников для шита «применить к ученику».
+ */
+@Serializable
+data class CardLibraryResponse(
+    val templates: List<CardTemplateDto> = emptyList(),
+    val students: List<CardLibraryStudentDto> = emptyList(),
+)
+
+/**
+ * Карточка-шаблон из библиотеки: контент + агрегированная статистика решений
+ * учеников (taken/skipped/pending). template_id nullable — фолбэк на id.
+ */
+@Serializable
+data class CardTemplateDto(
+    val id: String,
+    @SerialName("template_id") val templateId: String? = null,
+    val title: String? = null,
+    val body: String? = null,
+    val quote: String? = null,
+    val tags: List<String>? = null,
+    @SerialName("trainer_status") val trainerStatus: String = "draft",
+    @SerialName("created_at") val createdAt: String? = null,
+    @SerialName("student_count") val studentCount: Int = 0,
+    @SerialName("taken_count") val takenCount: Int = 0,
+    @SerialName("skipped_count") val skippedCount: Int = 0,
+    @SerialName("pending_count") val pendingCount: Int = 0,
+    @SerialName("student_ids") val studentIds: List<String> = emptyList(),
+)
+
+/** Краткий профиль ученика для шита применения (`{ id, full_name, avatar_url }`). */
+@Serializable
+data class CardLibraryStudentDto(
+    val id: String,
+    @SerialName("full_name") val fullName: String? = null,
+    @SerialName("avatar_url") val avatarUrl: String? = null,
+)
+
+/** Ответ `GET /api/v1/collections` (listTrainerCollectionsCore) — обёртка `{ collections }`. */
+@Serializable
+data class TrainerCollectionsResponse(
+    val collections: List<TrainerCollectionDto> = emptyList(),
+)
+
+/** Коллекция шаблонов тренера: имя + кол-во карточек + id шаблонов в ней. */
+@Serializable
+data class TrainerCollectionDto(
+    val id: String,
+    @SerialName("trainer_id") val trainerId: String? = null,
+    val name: String,
+    @SerialName("created_at") val createdAt: String? = null,
+    @SerialName("card_count") val cardCount: Int = 0,
+    @SerialName("template_ids") val templateIds: List<String> = emptyList(),
+)
+
+/** Тело `POST /api/v1/collections` — создать коллекцию. Ответ — CreatedResponse{ok,id}. */
+@Serializable
+data class CreateCollectionRequest(
+    val name: String,
+)
+
+/** Тело `POST /api/v1/collections/{id}/cards` — добавить шаблон в коллекцию. */
+@Serializable
+data class AddCardToCollectionRequest(
+    val templateId: String,
+)
+
+/** Тело `POST /api/v1/sessions/{id}/templates/apply` — применить шаблон к сессии ученика. */
+@Serializable
+data class ApplyTemplateRequest(
+    val templateId: String,
+)
+
+/** Тело `POST /api/v1/collections/{id}/apply` — применить коллекцию к сессии ученика. */
+@Serializable
+data class ApplyCollectionRequest(
+    val sessionId: String,
+)
+
+/** Ответ `…/collections/{id}/apply` — `{ ok, applied }` (сколько карточек добавлено). */
+@Serializable
+data class ApplyCollectionResponse(
+    val ok: Boolean = true,
+    val applied: Int = 0,
+)
+
+// -----------------------------------------------------------------------------
 // G2 (#31) — регистрация FCM-токена устройства для push-уведомлений.
 // -----------------------------------------------------------------------------
 

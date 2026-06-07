@@ -3,6 +3,8 @@ package com.nivel.trainer.data
 import com.nivel.trainer.data.local.InsightCardEntity
 import com.nivel.trainer.data.local.SessionEntity
 import com.nivel.trainer.data.local.StudentEntity
+import com.nivel.trainer.data.remote.CardLibraryStudentDto
+import com.nivel.trainer.data.remote.CardTemplateDto
 import com.nivel.trainer.data.remote.GoalDto
 import com.nivel.trainer.data.remote.MasterPlanDto
 import com.nivel.trainer.data.remote.MasterPlanItemDto
@@ -19,6 +21,10 @@ import com.nivel.trainer.data.remote.StudentInviteResponse
 import com.nivel.trainer.data.remote.StudentSessionDto
 import com.nivel.trainer.data.remote.TranscriptResponse
 import com.nivel.trainer.data.remote.TranscriptSegmentDto
+import com.nivel.trainer.data.remote.TrainerCollectionDto
+import com.nivel.trainer.domain.CardCollection
+import com.nivel.trainer.domain.CardLibraryStudent
+import com.nivel.trainer.domain.CardTemplate
 import com.nivel.trainer.domain.Goal
 import com.nivel.trainer.domain.InsightCard
 import com.nivel.trainer.domain.InviteStatus
@@ -299,6 +305,38 @@ fun SessionInsightCardDto.toDomain(sessionId: String) = InsightCard(
     studentDecision = studentDecision,
     position = position,
     createdAt = createdAt,
+)
+
+// --- E4 (#27): библиотека карточек-шаблонов и коллекции (DTO → domain, без Room) ---
+
+fun CardTemplateDto.toDomain() = CardTemplate(
+    id = id,
+    templateId = templateId,
+    title = title,
+    body = body,
+    quote = quote,
+    tags = tags ?: emptyList(),
+    trainerStatus = trainerStatus,
+    createdAt = createdAt,
+    studentCount = studentCount,
+    takenCount = takenCount,
+    skippedCount = skippedCount,
+    pendingCount = pendingCount,
+    studentIds = studentIds,
+)
+
+fun CardLibraryStudentDto.toDomain() = CardLibraryStudent(
+    id = id,
+    fullName = fullName,
+    avatarUrl = avatarUrl,
+)
+
+fun TrainerCollectionDto.toDomain() = CardCollection(
+    id = id,
+    name = name,
+    createdAt = createdAt,
+    cardCount = cardCount,
+    templateIds = templateIds,
 )
 
 /** Тот же DTO → Room-entity для кэша карточек (B3). `sessionId` из пути. */

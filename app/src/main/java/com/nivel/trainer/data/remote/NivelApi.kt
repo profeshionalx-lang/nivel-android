@@ -245,6 +245,70 @@ interface NivelApi {
     ): OkResponse
 
     // ---------------------------------------------------------------------------
+    // E4 (#27) — библиотека карточек-шаблонов и коллекции (read + ведение + apply).
+    // Контракт read — NIVEL#200/PR#201; write-эндпоинты применения/коллекций уже есть.
+    // ---------------------------------------------------------------------------
+
+    /**
+     * Библиотека карточек-шаблонов тренера (`GET /api/v1/cards`): шаблоны (дедуп по
+     * template_id, со статистикой решений) + ученики для шита применения. Trainer-only.
+     *
+     * TODO: реальный endpoint NIVEL#200 (PR #201) — на момент написания read-эндпоинт
+     * ещё не влит в main NIVEL; контракт ответа зафиксирован контракт-тестами PR #201.
+     * До мержа вызов вернёт 404 — экран корректно покажет состояние ошибки.
+     */
+    @GET("api/v1/cards")
+    suspend fun getCardLibrary(): CardLibraryResponse
+
+    /**
+     * Коллекции шаблонов тренера (`GET /api/v1/collections`). Обёртка `{ collections }`;
+     * у каждой — id шаблонов и счётчик карточек. Trainer-only.
+     *
+     * TODO: реальный endpoint NIVEL#200 (PR #201) — GET-метод добавляется тем же PR;
+     * write-методы (`POST /collections` и т.д.) уже есть. До мержа GET вернёт 404.
+     */
+    @GET("api/v1/collections")
+    suspend fun getCollections(): TrainerCollectionsResponse
+
+    /** Создать коллекцию (`POST /api/v1/collections`, 201). Тело `{ name }`, ответ `{ ok, id }`. */
+    @POST("api/v1/collections")
+    suspend fun createCollection(@Body body: CreateCollectionRequest): CreatedResponse
+
+    /** Добавить шаблон в коллекцию (`POST /api/v1/collections/{id}/cards`, 201). */
+    @POST("api/v1/collections/{collectionId}/cards")
+    suspend fun addCardToCollection(
+        @Path("collectionId") collectionId: String,
+        @Body body: AddCardToCollectionRequest,
+    ): OkResponse
+
+    /** Убрать шаблон из коллекции (`DELETE /api/v1/collections/{id}/cards/{templateId}`). */
+    @DELETE("api/v1/collections/{collectionId}/cards/{templateId}")
+    suspend fun removeCardFromCollection(
+        @Path("collectionId") collectionId: String,
+        @Path("templateId") templateId: String,
+    ): OkResponse
+
+    /**
+     * Применить шаблон к сессии ученика (`POST /api/v1/sessions/{id}/templates/apply`, 201).
+     * Тело `{ templateId }`. Создаёт approved-карточку у ученика сессии. Trainer-only.
+     */
+    @POST("api/v1/sessions/{sessionId}/templates/apply")
+    suspend fun applyTemplateToSession(
+        @Path("sessionId") sessionId: String,
+        @Body body: ApplyTemplateRequest,
+    ): CreatedResponse
+
+    /**
+     * Применить коллекцию к сессии ученика (`POST /api/v1/collections/{id}/apply`).
+     * Тело `{ sessionId }`. Применяет все шаблоны коллекции; ответ `{ ok, applied }`.
+     */
+    @POST("api/v1/collections/{collectionId}/apply")
+    suspend fun applyCollectionToSession(
+        @Path("collectionId") collectionId: String,
+        @Body body: ApplyCollectionRequest,
+    ): ApplyCollectionResponse
+
+    // ---------------------------------------------------------------------------
     // G2 (#31) — регистрация FCM-токена устройства для серверных push-уведомлений.
     // ---------------------------------------------------------------------------
 

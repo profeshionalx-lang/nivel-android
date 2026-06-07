@@ -1,5 +1,7 @@
 package com.nivel.trainer.di
 
+import com.nivel.trainer.data.repository.CardLibraryRepository
+import com.nivel.trainer.data.repository.DefaultCardLibraryRepository
 import com.nivel.trainer.data.repository.DefaultInsightCardRepository
 import com.nivel.trainer.data.repository.DefaultInsightsRepository
 import com.nivel.trainer.data.repository.DefaultSessionDetailRepository
@@ -57,4 +59,9 @@ abstract class RepositoryModule {
     @Binds
     @Singleton
     abstract fun bindTranscriptRepository(impl: DefaultTranscriptRepository): TranscriptRepository
+
+    // E4 (#27) — библиотека карточек-шаблонов и коллекции.
+    @Binds
+    @Singleton
+    abstract fun bindCardLibraryRepository(impl: DefaultCardLibraryRepository): CardLibraryRepository
 }

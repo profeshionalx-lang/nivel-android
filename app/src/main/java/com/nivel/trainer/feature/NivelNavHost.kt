@@ -10,6 +10,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.navArgument
 import com.nivel.trainer.feature.auth.LoginScreen
 import com.nivel.trainer.feature.auth.SplashScreen
+import com.nivel.trainer.feature.cards.CardLibraryScreen
 import com.nivel.trainer.feature.home.HomeScreen
 import com.nivel.trainer.feature.home.StudentsListScreen
 import com.nivel.trainer.feature.recorder.RecorderScreen
@@ -23,6 +24,9 @@ object NivelRoutes {
     const val LOGIN = "login"
     const val HOME = "home"
     const val STUDENTS = "students"
+
+    /** Библиотека карточек-шаблонов и коллекции (E4). */
+    const val CARDS = "cards"
 
     /** Профиль ученика (B5). Аргумент — id ученика. */
     const val STUDENT_ARG = "studentId"
@@ -106,6 +110,14 @@ fun NivelNavHost(
         composable(NivelRoutes.HOME) {
             HomeScreen(
                 onOpenStudents = { navController.navigate(NivelRoutes.STUDENTS) },
+                onOpenCards = { navController.navigate(NivelRoutes.CARDS) },
+            )
+        }
+
+        // E4 (#27) — библиотека карточек-шаблонов и коллекции.
+        composable(NivelRoutes.CARDS) {
+            CardLibraryScreen(
+                onBack = { navController.popBackStack() },
             )
         }
 

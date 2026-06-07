@@ -232,3 +232,55 @@ data class TranscriptSegment(
     val text: String,
     val avgLogprob: Double?,
 )
+
+// --- E4 (#27): библиотека карточек-шаблонов и коллекции ---
+
+/**
+ * Карточка-шаблон из библиотеки тренера (порт web `CardTemplate`). Дедуплицирована
+ * по [templateId] (фолбэк — [id]) с агрегированной статистикой решений учеников.
+ * [studentIds] — для фильтра «по ученику», как в вебе.
+ */
+data class CardTemplate(
+    val id: String,
+    val templateId: String?,
+    val title: String?,
+    val body: String?,
+    val quote: String?,
+    val tags: List<String>,
+    val trainerStatus: String,
+    val createdAt: String?,
+    val studentCount: Int,
+    val takenCount: Int,
+    val skippedCount: Int,
+    val pendingCount: Int,
+    val studentIds: List<String>,
+) {
+    /** Ключ шаблона для коллекций/применения: template_id или id (как `template_id ?? id` в вебе). */
+    val key: String get() = templateId ?: id
+}
+
+/** Краткий профиль ученика для шита применения карточки/коллекции. */
+data class CardLibraryStudent(
+    val id: String,
+    val fullName: String?,
+    val avatarUrl: String?,
+)
+
+/** Коллекция шаблонов тренера: имя + кол-во карточек + ключи шаблонов в ней. */
+data class CardCollection(
+    val id: String,
+    val name: String,
+    val createdAt: String?,
+    val cardCount: Int,
+    val templateIds: List<String>,
+)
+
+/**
+ * Полное содержимое экрана библиотеки карточек (E4): шаблоны, ученики (для apply),
+ * коллекции. Источник правды — сервер; экран точечный, без Room-кэша.
+ */
+data class CardLibrary(
+    val templates: List<CardTemplate>,
+    val students: List<CardLibraryStudent>,
+    val collections: List<CardCollection>,
+)

@@ -25,6 +25,7 @@ import com.nivel.trainer.ui.theme.NivelTheme
 @Composable
 fun HomeScreen(
     onOpenStudents: () -> Unit = {},
+    onOpenLibrary: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     Box(
@@ -45,6 +46,13 @@ fun HomeScreen(
                 shape = RoundedCornerShape(12.dp),
             ) {
                 Text("Ученики")
+            }
+            Button(
+                onClick = onOpenLibrary,
+                modifier = Modifier.heightIn(min = 48.dp),
+                shape = RoundedCornerShape(12.dp),
+            ) {
+                Text("Library")
             }
         }
     }

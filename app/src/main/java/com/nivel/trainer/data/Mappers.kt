@@ -7,10 +7,12 @@ import com.nivel.trainer.data.remote.GoalDto
 import com.nivel.trainer.data.remote.MasterPlanDto
 import com.nivel.trainer.data.remote.MasterPlanItemDto
 import com.nivel.trainer.data.remote.MasterPlanSectionDto
+import com.nivel.trainer.data.remote.ExerciseDto
 import com.nivel.trainer.data.remote.ProblemDto
 import com.nivel.trainer.data.remote.SessionDetailResponse
 import com.nivel.trainer.data.remote.SessionDto
 import com.nivel.trainer.data.remote.SessionInsightCardDto
+import com.nivel.trainer.data.remote.SkillDto
 import com.nivel.trainer.data.remote.SessionTranscriptStatusResponse
 import com.nivel.trainer.data.remote.ShadowStudentResponse
 import com.nivel.trainer.data.remote.StudentDetailResponse
@@ -25,8 +27,10 @@ import com.nivel.trainer.domain.InviteStatus
 import com.nivel.trainer.domain.MasterPlan
 import com.nivel.trainer.domain.MasterPlanItem
 import com.nivel.trainer.domain.MasterPlanSection
+import com.nivel.trainer.domain.ExerciseRef
 import com.nivel.trainer.domain.Problem
 import com.nivel.trainer.domain.SessionAudioStatus
+import com.nivel.trainer.domain.SkillRef
 import com.nivel.trainer.domain.SessionDetail
 import com.nivel.trainer.domain.ShadowStudent
 import com.nivel.trainer.domain.Student
@@ -145,6 +149,12 @@ fun ProblemDto.toDomain() = Problem(
     categoryId = categoryId,
     name = name,
 )
+
+/** E6 (#29): навык справочника → доменная модель для экрана «Library». */
+fun SkillDto.toDomain() = SkillRef(id = id, name = name)
+
+/** E6 (#29): упражнение справочника → доменная модель для экрана «Library». */
+fun ExerciseDto.toDomain() = ExerciseRef(id = id, name = name)
 
 fun StudentSessionDto.toDomain() = StudentSession(
     id = id,

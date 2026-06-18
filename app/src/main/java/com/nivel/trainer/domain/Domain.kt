@@ -85,6 +85,27 @@ data class Problem(
     val name: String,
 )
 
+/** Навык из справочника (E6). `name` локализован сервером (`?lang`). */
+data class SkillRef(
+    val id: Int,
+    val name: String,
+)
+
+/** Упражнение из справочника (E6). */
+data class ExerciseRef(
+    val id: Int,
+    val name: String,
+)
+
+/**
+ * Содержимое экрана «Library» (E6): полные списки навыков и упражнений тренера —
+ * один-в-один с веб-страницей `trainer/library` (read-only справочник).
+ */
+data class Library(
+    val skills: List<SkillRef>,
+    val exercises: List<ExerciseRef>,
+)
+
 /**
  * Сессия в карточке профиля ученика. Легче [TrainingSession]: контракт
  * `/students/{id}` отдаёт только id/номер/статус/даты, `sessionNumber` nullable.

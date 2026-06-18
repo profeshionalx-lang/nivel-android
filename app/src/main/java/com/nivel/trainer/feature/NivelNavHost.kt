@@ -12,6 +12,7 @@ import com.nivel.trainer.feature.auth.LoginScreen
 import com.nivel.trainer.feature.auth.SplashScreen
 import com.nivel.trainer.feature.home.HomeScreen
 import com.nivel.trainer.feature.home.StudentsListScreen
+import com.nivel.trainer.feature.library.LibraryScreen
 import com.nivel.trainer.feature.recorder.RecorderScreen
 import com.nivel.trainer.feature.session.SessionDetailScreen
 import com.nivel.trainer.feature.student.StudentProfileScreen
@@ -23,6 +24,9 @@ object NivelRoutes {
     const val LOGIN = "login"
     const val HOME = "home"
     const val STUDENTS = "students"
+
+    /** Справочник навыков и упражнений (E6). */
+    const val LIBRARY = "library"
 
     /** Профиль ученика (B5). Аргумент — id ученика. */
     const val STUDENT_ARG = "studentId"
@@ -106,7 +110,13 @@ fun NivelNavHost(
         composable(NivelRoutes.HOME) {
             HomeScreen(
                 onOpenStudents = { navController.navigate(NivelRoutes.STUDENTS) },
+                onOpenLibrary = { navController.navigate(NivelRoutes.LIBRARY) },
             )
+        }
+
+        // E6 (#29) — справочник навыков и упражнений (read-only).
+        composable(NivelRoutes.LIBRARY) {
+            LibraryScreen(onBack = { navController.popBackStack() })
         }
 
         // B4 (#7) — экран «Ученики» + создание теневого ученика и приглашение.

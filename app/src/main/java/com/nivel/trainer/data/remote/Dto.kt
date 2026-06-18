@@ -261,14 +261,30 @@ data class CreateSessionForStudentResponse(
 
 /**
  * Ответ `GET /api/v1/reference` (A3, `src/app/api/v1/reference/route.ts`).
- * Локализован по `?lang=ru|en`. Нам для целей нужны только `problems`
- * (+ категории для группировки); навыки/упражнения здесь не используем,
- * поэтому в DTO не объявляем (kotlinx игнорирует лишние поля).
+ * Локализован по `?lang=ru|en`. Для целей (E2) нужны `problems` (+ категории),
+ * для справочника-экрана (E6) — `skills` и `exercises` (оба `{ id, name }`,
+ * `getReferenceCore`).
  */
 @Serializable
 data class ReferenceResponse(
     @SerialName("problem_categories") val problemCategories: List<ProblemCategoryDto> = emptyList(),
     val problems: List<ProblemDto> = emptyList(),
+    val skills: List<SkillDto> = emptyList(),
+    val exercises: List<ExerciseDto> = emptyList(),
+)
+
+/** Навык из справочника (`skills.select(id, name_ru|name_en)`); `name` уже локализован сервером. */
+@Serializable
+data class SkillDto(
+    val id: Int,
+    val name: String = "",
+)
+
+/** Упражнение из справочника (`exercises.select(id, name)`). */
+@Serializable
+data class ExerciseDto(
+    val id: Int,
+    val name: String = "",
 )
 
 @Serializable

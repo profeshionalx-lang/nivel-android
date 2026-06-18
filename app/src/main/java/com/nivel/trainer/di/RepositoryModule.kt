@@ -2,6 +2,7 @@ package com.nivel.trainer.di
 
 import com.nivel.trainer.data.repository.DefaultInsightCardRepository
 import com.nivel.trainer.data.repository.DefaultInsightsRepository
+import com.nivel.trainer.data.repository.DefaultLibraryRepository
 import com.nivel.trainer.data.repository.DefaultSessionDetailRepository
 import com.nivel.trainer.data.repository.DefaultSessionRepository
 import com.nivel.trainer.data.repository.DefaultStudentProfileRepository
@@ -9,6 +10,7 @@ import com.nivel.trainer.data.repository.DefaultStudentRepository
 import com.nivel.trainer.data.repository.DefaultTranscriptRepository
 import com.nivel.trainer.data.repository.InsightCardRepository
 import com.nivel.trainer.data.repository.InsightsRepository
+import com.nivel.trainer.data.repository.LibraryRepository
 import com.nivel.trainer.data.repository.SessionDetailRepository
 import com.nivel.trainer.data.repository.SessionRepository
 import com.nivel.trainer.data.repository.StudentProfileRepository
@@ -57,4 +59,9 @@ abstract class RepositoryModule {
     @Binds
     @Singleton
     abstract fun bindTranscriptRepository(impl: DefaultTranscriptRepository): TranscriptRepository
+
+    // E6 (#29) — справочник навыков и упражнений (экран «Library»).
+    @Binds
+    @Singleton
+    abstract fun bindLibraryRepository(impl: DefaultLibraryRepository): LibraryRepository
 }

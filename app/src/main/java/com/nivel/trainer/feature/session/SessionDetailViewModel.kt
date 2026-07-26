@@ -4,7 +4,10 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.nivel.trainer.data.repository.InsightsRepository
 import com.nivel.trainer.data.repository.InsightsResult
+import com.nivel.trainer.data.repository.SessionCollectionsRepository
 import com.nivel.trainer.data.repository.SessionDetailRepository
+import com.nivel.trainer.domain.CardCollection
+import com.nivel.trainer.domain.CollectionCardPreview
 import com.nivel.trainer.domain.InsightCard
 import com.nivel.trainer.domain.SessionOverview
 import com.nivel.trainer.service.upload.AudioUploadScheduler
@@ -18,6 +21,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import retrofit2.HttpException
 import javax.inject.Inject
 
 /**
@@ -31,6 +35,31 @@ sealed interface PasteSheetState {
         val submitting: Boolean = false,
         val error: String? = null,
     ) : PasteSheetState
+}
+
+/**
+ * Состояние шита «Добавить из библиотеки» (#78) — применение коллекции карточек
+ * к текущей сессии. `Closed` → список коллекций → превью карточек выбранной →
+ * (успех) закрывается и триггерит [SessionDetailViewModel.refresh].
+ */
+sealed interface LibrarySheetState {
+    data object Closed : LibrarySheetState
+
+    data class ListCollections(
+        val collections: List<CardCollection> = emptyList(),
+        val loading: Boolean = true,
+        val error: String? = null,
+    ) : LibrarySheetState
+
+    data class PreviewCollection(
+        val collection: CardCollection,
+        val cards: List<CollectionCardPreview> = emptyList(),
+        val loading: Boolean = true,
+        val error: String? = null,
+        val applying: Boolean = false,
+        val applyError: String? = null,
+        val applied: Boolean = false,
+    ) : LibrarySheetState
 }
 
 /**
@@ -70,6 +99,8 @@ data class SessionDetailUiState(
      * UI показывает оффлайн-баннер «Показаны данные из кэша».
      */
     val isOffline: Boolean = false,
+    /** #78 — шит «Добавить из библиотеки» (применение коллекции карточек). */
+    val librarySheet: LibrarySheetState = LibrarySheetState.Closed,
 )
 
 /**
@@ -87,6 +118,7 @@ class SessionDetailViewModel @Inject constructor(
     private val insightsRepository: InsightsRepository,
     private val uploadStatusObserver: UploadStatusObserver,
     private val uploadScheduler: AudioUploadScheduler,
+    private val collectionsRepository: SessionCollectionsRepository,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(SessionDetailUiState())
@@ -317,9 +349,91 @@ class SessionDetailViewModel @Inject constructor(
         }
     }
 
+    // --- #78: применение коллекции карточек к сессии ---
+
+    /** Открывает шит и грузит список коллекций тренера. */
+    fun openLibrarySheet() {
+        _uiState.update { it.copy(librarySheet = LibrarySheetState.ListCollections()) }
+        viewModelScope.launch {
+            collectionsRepository.getCollections()
+                .onSuccess { collections ->
+                    _uiState.update { state ->
+                        val sheet = state.librarySheet as? LibrarySheetState.ListCollections ?: return@update state
+                        state.copy(librarySheet = sheet.copy(collections = collections, loading = false, error = null))
+                    }
+                }
+                .onFailure { e ->
+                    _uiState.update { state ->
+                        val sheet = state.librarySheet as? LibrarySheetState.ListCollections ?: return@update state
+                        state.copy(librarySheet = sheet.copy(loading = false, error = mapError(e)))
+                    }
+                }
+        }
+    }
+
+    fun dismissLibrarySheet() {
+        val sheet = _uiState.value.librarySheet
+        if (sheet is LibrarySheetState.PreviewCollection && sheet.applying) return // не закрываем во время применения
+        _uiState.update { it.copy(librarySheet = LibrarySheetState.Closed) }
+    }
+
+    /** Тап по коллекции в списке — грузит превью её карточек перед применением. */
+    fun selectCollection(collection: CardCollection) {
+        _uiState.update { it.copy(librarySheet = LibrarySheetState.PreviewCollection(collection = collection)) }
+        viewModelScope.launch {
+            collectionsRepository.getCollectionCards(collection.id)
+                .onSuccess { cards ->
+                    _uiState.update { state ->
+                        val sheet = state.librarySheet as? LibrarySheetState.PreviewCollection ?: return@update state
+                        state.copy(librarySheet = sheet.copy(cards = cards, loading = false, error = null))
+                    }
+                }
+                .onFailure { e ->
+                    _uiState.update { state ->
+                        val sheet = state.librarySheet as? LibrarySheetState.PreviewCollection ?: return@update state
+                        state.copy(librarySheet = sheet.copy(loading = false, error = mapError(e)))
+                    }
+                }
+        }
+    }
+
+    /**
+     * «Другая коллекция» — назад к списку. Список короткоживущий и дешёвый — проще
+     * перезапросить заново, чем таскать его отдельно в состоянии превью ради одного
+     * возврата назад; [openLibrarySheet] сама сбрасывает состояние на `ListCollections`.
+     */
+    fun backToCollectionsList() = openLibrarySheet()
+
+    /** Применяет выбранную коллекцию к текущей сессии; при успехе перечитывает карточки. */
+    fun applySelectedCollection() {
+        val id = sessionId ?: return
+        val sheet = _uiState.value.librarySheet as? LibrarySheetState.PreviewCollection ?: return
+        if (sheet.applying) return
+
+        _uiState.update { it.copy(librarySheet = sheet.copy(applying = true, applyError = null)) }
+        viewModelScope.launch {
+            collectionsRepository.applyCollection(sheet.collection.id, id)
+                .onSuccess {
+                    _uiState.update { state ->
+                        val current = state.librarySheet as? LibrarySheetState.PreviewCollection ?: return@update state
+                        state.copy(librarySheet = current.copy(applying = false, applied = true))
+                    }
+                    refresh()
+                }
+                .onFailure { e ->
+                    _uiState.update { state ->
+                        val current = state.librarySheet as? LibrarySheetState.PreviewCollection ?: return@update state
+                        state.copy(librarySheet = current.copy(applying = false, applyError = mapError(e)))
+                    }
+                }
+        }
+    }
+
     private fun mapError(e: Throwable): String = when {
         // G3 (#32): сетевую ошибку показываем понятной «нет связи» формулировкой.
         isNetworkError(e) -> "Нет подключения к интернету. Проверьте сеть и повторите."
+        // #78: чужая коллекция → 403 — понятный текст вместо «HTTP 403 Forbidden».
+        e is HttpException && e.code() == 403 -> "Нет доступа к этой коллекции."
         else -> e.message?.takeIf { it.isNotBlank() } ?: "Что-то пошло не так. Попробуйте снова."
     }
 }

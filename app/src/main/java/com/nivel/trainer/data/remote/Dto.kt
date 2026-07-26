@@ -593,3 +593,47 @@ data class CreateLibraryItemResponse(
     val ok: Boolean,
     val id: Int,
 )
+
+// -----------------------------------------------------------------------------
+// #78 — применение коллекций карточек к сессии: GET /api/v1/collections,
+// GET /api/v1/collections/{id}/cards, POST /api/v1/collections/{id}/apply
+// (NIVEL#226 read, ранее существовавший write). Контракт сверен по
+// docs/api/v1-contract.md.
+// -----------------------------------------------------------------------------
+
+@Serializable
+data class CollectionsResponse(
+    val collections: List<CollectionDto> = emptyList(),
+)
+
+/** Коллекция карточек тренера (веб: `/trainer/cards`, вкладка Collections). */
+@Serializable
+data class CollectionDto(
+    val id: String,
+    val name: String,
+    @SerialName("cards_count") val cardsCount: Int = 0,
+    @SerialName("created_at") val createdAt: String? = null,
+)
+
+/**
+ * Ответ `GET /api/v1/collections/{id}/cards` — та же форма карточки, что у
+ * `GET /sessions/{id}/insight-cards` (контракт явно требует переиспользовать
+ * [SessionInsightCardDto], не заводить второй DTO).
+ */
+@Serializable
+data class CollectionCardsResponse(
+    val cards: List<SessionInsightCardDto> = emptyList(),
+)
+
+/** Тело `POST /api/v1/collections/{id}/apply` — применить коллекцию к сессии. */
+@Serializable
+data class ApplyCollectionRequest(
+    val sessionId: String,
+)
+
+/** Ответ применения: `{ ok, applied }` — сколько карточек добавлено в сессию. */
+@Serializable
+data class ApplyCollectionResponse(
+    val ok: Boolean = true,
+    val applied: Int = 0,
+)

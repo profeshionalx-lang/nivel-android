@@ -21,6 +21,8 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.input.pointer.pointerInput
@@ -59,6 +61,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -82,6 +85,7 @@ private val Background = Color(0xFF0E0E0E)            // --background
 private val SurfaceLow = Color(0xFF161616)           // --surface-low
 private val SurfaceCard = Color(0xFF1E1E1E)          // --surface-card
 private val Primary = Color(0xFFCAFD00)              // --primary (лайм)
+private val Secondary = Color(0xFF7CC6FE)            // --secondary (голубой, ссылки)
 private val OnPrimary = Color(0xFF000000)            // text на primary
 private val SurfaceElevated = Color(0xFF262626)      // --surface-elevated (поле ввода)
 private val BorderDim = Color(0xFF2E2E2E)            // --border-dim
@@ -160,6 +164,7 @@ fun SessionDetailScreen(
         isOffline = state.isOffline,
         onGenerate = viewModel::generateInsights,
         onOpenPaste = viewModel::openPasteSheet,
+        onOpenLibrary = viewModel::openLibrarySheet,
         onCompleteReview = viewModel::completeReview,
         onDismissCompleteReviewError = viewModel::dismissCompleteReviewError,
         onMoveCard = viewModel::moveCard,
@@ -178,6 +183,17 @@ fun SessionDetailScreen(
             onMarkdownChange = viewModel::onPasteMarkdownChange,
             onSubmit = viewModel::submitPaste,
             onDismiss = viewModel::closePasteSheet,
+        )
+    }
+
+    // #78 — применение коллекции карточек к сессии.
+    if (state.librarySheet != LibrarySheetState.Closed) {
+        LibrarySheet(
+            state = state.librarySheet,
+            onSelectCollection = viewModel::selectCollection,
+            onBackToList = viewModel::backToCollectionsList,
+            onApply = viewModel::applySelectedCollection,
+            onDismiss = viewModel::dismissLibrarySheet,
         )
     }
 }
@@ -204,6 +220,7 @@ private fun SessionDetailContent(
     isOffline: Boolean = false,
     onGenerate: () -> Unit = {},
     onOpenPaste: () -> Unit = {},
+    onOpenLibrary: () -> Unit = {},
     onRecord: () -> Unit = {},
     onRetryUpload: () -> Unit = {},
     onCompleteReview: () -> Unit = {},
@@ -254,6 +271,7 @@ private fun SessionDetailContent(
                     cards = reorderedCards ?: overview.cards,
                     onGenerate = onGenerate,
                     onOpenPaste = onOpenPaste,
+                    onOpenLibrary = onOpenLibrary,
                     onRecord = onRecord,
                     onRetryUpload = onRetryUpload,
                     onCompleteReview = onCompleteReview,
@@ -313,6 +331,7 @@ private fun SessionBody(
     cards: List<com.nivel.trainer.domain.InsightCard>,
     onGenerate: () -> Unit,
     onOpenPaste: () -> Unit,
+    onOpenLibrary: () -> Unit,
     onRecord: () -> Unit,
     onRetryUpload: () -> Unit,
     onCompleteReview: () -> Unit,
@@ -341,6 +360,7 @@ private fun SessionBody(
                 generateError = generateError,
                 onGenerate = onGenerate,
                 onOpenPaste = onOpenPaste,
+                onOpenLibrary = onOpenLibrary,
                 onMoveCard = onMoveCard,
                 onCardDragEnd = onCardDragEnd,
             )
@@ -556,6 +576,7 @@ private fun CardsSection(
     generateError: String?,
     onGenerate: () -> Unit,
     onOpenPaste: () -> Unit,
+    onOpenLibrary: () -> Unit,
     onMoveCard: (fromIndex: Int, toIndex: Int) -> Unit,
     onCardDragEnd: () -> Unit,
 ) {
@@ -575,6 +596,9 @@ private fun CardsSection(
 
         // Вставить инсайты от Claude — доступно тренеру всегда (как PasteInsightsButton).
         PasteInsightButton(onClick = onOpenPaste)
+
+        // #78 — применить готовую коллекцию карточек из библиотеки к этой сессии.
+        LibraryButton(onClick = onOpenLibrary)
 
         if (cards.isEmpty()) {
             Text(
@@ -972,6 +996,43 @@ private fun PasteInsightButton(onClick: () -> Unit) {
     }
 }
 
+/**
+ * Карточка-кнопка «Добавить из библиотеки» (#78) — открывает шит выбора коллекции
+ * карточек для применения к этой сессии. У этого входа нет прямого веб-эталона:
+ * на вебе применение коллекции стартует со страницы `/trainer/cards`, а не с
+ * экрана сессии — но именно так просит acceptance #78 (сессия уже известна,
+ * не нужно заново выбирать ученика/сессию, как в `ApplyCardSheet.tsx`).
+ */
+@Composable
+private fun LibraryButton(onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = TouchTarget)
+            .clickable(onClick = onClick)
+            .background(SurfaceCard, RoundedCornerShape(16.dp))
+            .padding(16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Text("📚", fontSize = 18.sp)
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = "Добавить из библиотеки",
+                color = OnSurface,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Bold,
+            )
+            Text(
+                text = "Применить готовую коллекцию карточек",
+                color = OnSurfaceVariant,
+                fontSize = 12.sp,
+            )
+        }
+        Text("›", color = OnSurfaceVariant, fontSize = 20.sp)
+    }
+}
+
 /** Лаймовая кнопка действия (submit/retry) — как `kinetic-gradient` в вебе. */
 @Composable
 private fun PrimaryActionButton(text: String, onClick: () -> Unit, enabled: Boolean = true) {
@@ -1163,6 +1224,249 @@ private fun PasteInsightsSheet(
                 }
             }
         }
+    }
+}
+
+/**
+ * Шит «Добавить из библиотеки» (#78): список коллекций тренера → превью карточек
+ * выбранной → «Применить». Mobile-first bottom-sheet (не центрированный диалог).
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun LibrarySheet(
+    state: LibrarySheetState,
+    onSelectCollection: (com.nivel.trainer.domain.CardCollection) -> Unit,
+    onBackToList: () -> Unit,
+    onApply: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = SurfaceCard,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .widthIn(max = 430.dp)
+                .padding(horizontal = 24.dp)
+                .padding(bottom = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Text(
+                    text = when (state) {
+                        is LibrarySheetState.PreviewCollection -> state.collection.name
+                        else -> "Добавить из библиотеки"
+                    },
+                    color = OnSurface,
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Black,
+                    modifier = Modifier.weight(1f),
+                    maxLines = 1,
+                )
+                IconButton(onClick = onDismiss, modifier = Modifier.size(TouchTarget)) {
+                    Text("✕", color = OnSurfaceVariant, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+
+            when (state) {
+                is LibrarySheetState.Closed -> Unit
+
+                is LibrarySheetState.ListCollections -> when {
+                    state.loading -> Box(
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 24.dp),
+                        contentAlignment = Alignment.Center,
+                    ) { CircularProgressIndicator(color = Primary) }
+
+                    state.error != null -> Text(
+                        text = state.error,
+                        color = ErrorColor,
+                        fontSize = 13.sp,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(ErrorColor.copy(alpha = 0.1f), RoundedCornerShape(12.dp))
+                            .padding(12.dp),
+                    )
+
+                    state.collections.isEmpty() -> Text(
+                        text = "Библиотека коллекций пуста. Создайте коллекцию в вебе на странице «Карточки».",
+                        color = OnSurfaceVariant,
+                        fontSize = 13.sp,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(SurfaceElevated, RoundedCornerShape(12.dp))
+                            .padding(16.dp),
+                    )
+
+                    else -> Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        state.collections.forEach { collection ->
+                            CollectionRow(collection = collection, onClick = { onSelectCollection(collection) })
+                        }
+                    }
+                }
+
+                is LibrarySheetState.PreviewCollection -> Column(
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    if (state.applied) {
+                        Text(
+                            text = "✓ Коллекция применена — карточки добавлены в сессию.",
+                            color = Primary,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold,
+                        )
+                        Button(
+                            onClick = onDismiss,
+                            modifier = Modifier.fillMaxWidth().heightIn(min = TouchTarget),
+                            shape = RoundedCornerShape(12.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = Primary, contentColor = OnPrimary),
+                        ) {
+                            Text("Готово", fontWeight = FontWeight.Bold)
+                        }
+                    } else {
+                        Text(
+                            text = "← Другая коллекция",
+                            color = Secondary,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.clickable(onClick = onBackToList),
+                        )
+
+                        when {
+                            state.loading -> Box(
+                                modifier = Modifier.fillMaxWidth().padding(vertical = 24.dp),
+                                contentAlignment = Alignment.Center,
+                            ) { CircularProgressIndicator(color = Primary) }
+
+                            state.error != null -> Text(
+                                text = state.error,
+                                color = ErrorColor,
+                                fontSize = 13.sp,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .background(ErrorColor.copy(alpha = 0.1f), RoundedCornerShape(12.dp))
+                                    .padding(12.dp),
+                            )
+
+                            state.cards.isEmpty() -> Text(
+                                text = "В коллекции нет карточек.",
+                                color = OnSurfaceVariant,
+                                fontSize = 13.sp,
+                            )
+
+                            else -> LazyRow(
+                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                contentPadding = PaddingValues(end = 4.dp),
+                            ) {
+                                items(state.cards, key = { it.id }) { card -> CollectionCardPreviewChip(card) }
+                            }
+                        }
+
+                        state.applyError?.let { err ->
+                            Text(
+                                text = err,
+                                color = ErrorColor,
+                                fontSize = 12.sp,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .background(ErrorColor.copy(alpha = 0.1f), RoundedCornerShape(12.dp))
+                                    .padding(12.dp),
+                            )
+                        }
+
+                        Button(
+                            onClick = onApply,
+                            enabled = !state.applying && !state.loading && state.cards.isNotEmpty(),
+                            modifier = Modifier.fillMaxWidth().heightIn(min = TouchTarget),
+                            shape = RoundedCornerShape(12.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = Primary,
+                                contentColor = OnPrimary,
+                                disabledContainerColor = Primary.copy(alpha = 0.4f),
+                                disabledContentColor = OnPrimary,
+                            ),
+                        ) {
+                            Text(
+                                text = if (state.applying) "Применяем…" else "Применить к этой сессии",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 14.sp,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CollectionRow(collection: com.nivel.trainer.domain.CardCollection, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = TouchTarget + 8.dp)
+            .clickable(onClick = onClick)
+            .background(SurfaceElevated, RoundedCornerShape(12.dp))
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(collection.name, color = OnSurface, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+            Text(
+                text = "${collection.cardsCount} " + pluralCards(collection.cardsCount),
+                color = OnSurfaceVariant,
+                fontSize = 12.sp,
+            )
+        }
+        Text("›", color = OnSurfaceVariant, fontSize = 20.sp)
+    }
+}
+
+@Composable
+private fun CollectionCardPreviewChip(card: com.nivel.trainer.domain.CollectionCardPreview) {
+    Column(
+        modifier = Modifier
+            .width(180.dp)
+            .background(SurfaceElevated, RoundedCornerShape(12.dp))
+            .padding(12.dp),
+    ) {
+        Text(
+            text = card.title?.takeIf { it.isNotBlank() } ?: "Без заголовка",
+            color = OnSurface,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
+        card.body?.takeIf { it.isNotBlank() }?.let {
+            Text(
+                text = it,
+                color = OnSurfaceVariant,
+                fontSize = 11.sp,
+                maxLines = 3,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(top = 4.dp),
+            )
+        }
+    }
+}
+
+/** Русское склонение «карточка/карточки/карточек» по числу (веб делает то же для counts). */
+private fun pluralCards(count: Int): String {
+    val mod100 = count % 100
+    val mod10 = count % 10
+    return when {
+        mod100 in 11..14 -> "карточек"
+        mod10 == 1 -> "карточка"
+        mod10 in 2..4 -> "карточки"
+        else -> "карточек"
     }
 }
 

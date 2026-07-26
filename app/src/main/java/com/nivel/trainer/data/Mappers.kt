@@ -144,16 +144,21 @@ fun StudentSessionDto.toDomain() = StudentSession(
  * G3/#73: кэширует сессию из профиля ученика (`GET /students/{id}`) в Room —
  * тот же `sessions`, что и экран карточки тренировки. `sessionNumber` нет в базе
  * как nullable (см. [SessionEntity]), поэтому фолбэк 0, как в [SessionDetailResponse.toEntity].
+ *
+ * `trainerNotes`/`studentInsight`/`trainerReviewCompleted` в ответе профиля нет —
+ * они могут уже лежать в кэше из [SessionDetailRepository] (тренер заходил в карточку
+ * этой сессии раньше). Вызывающий код обязан передать [priorEntity] (текущий кэш той же
+ * сессии), иначе повторный вход на профиль после карточки сессии затирает их null/false.
  */
-fun StudentSessionDto.toEntity(studentId: String) = SessionEntity(
+fun StudentSessionDto.toEntity(studentId: String, priorEntity: SessionEntity?) = SessionEntity(
     id = id,
     studentId = studentId,
     goalId = goalId,
     sessionNumber = sessionNumber ?: 0,
-    trainerNotes = null,
-    studentInsight = null,
+    trainerNotes = priorEntity?.trainerNotes,
+    studentInsight = priorEntity?.studentInsight,
     status = status,
-    trainerReviewCompleted = false,
+    trainerReviewCompleted = priorEntity?.trainerReviewCompleted ?: false,
     scheduledAt = scheduledAt,
     completedAt = completedAt,
     createdAt = createdAt,

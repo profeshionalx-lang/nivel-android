@@ -153,10 +153,12 @@ class DefaultStudentProfileRepository @Inject constructor(
     }
 
     /**
-     * Кэширует базовую инфо ученика (та же таблица `students`, что и список — счётчики
-     * `activeGoals`/`totalSessions`/`createdAt` в detail-ответе отсутствуют, сохраняем
-     * то, что уже было в кэше) и его сессии (та же таблица `sessions`, что и карточка
-     * тренировки).
+     * Кэширует базовую инфо ученика (та же таблица `students`, что и список — счётчик
+     * `totalSessions`/`createdAt` в detail-ответе нет, сохраняем то, что уже было в кэше;
+     * `activeGoals`, если кэша ещё не было, считаем по тем же целям, что пришли в этом
+     * ответе, — точнее, чем дефолт 0) и его сессии (та же таблица `sessions`, что и
+     * карточка тренировки, — при обновлении сохраняем поля, которые мог заполнить
+     * [SessionDetailRepository]).
      */
     private suspend fun cacheProfile(studentId: String, detail: StudentDetailResponse) {
         val existing = studentDao.getById(studentId)
@@ -167,13 +169,18 @@ class DefaultStudentProfileRepository @Inject constructor(
                     fullName = detail.fullName,
                     email = detail.email,
                     avatarUrl = detail.avatarUrl,
-                    activeGoals = existing?.activeGoals ?: 0,
+                    activeGoals = existing?.activeGoals
+                        ?: detail.goals.count { it.status == "active" },
                     totalSessions = existing?.totalSessions ?: detail.sessions.size,
                     createdAt = existing?.createdAt,
                 ),
             ),
         )
-        sessionDao.replaceForStudent(studentId, detail.sessions.map { it.toEntity(studentId) })
+        val priorSessions = sessionDao.getByStudent(studentId).associateBy { it.id }
+        sessionDao.replaceForStudent(
+            studentId,
+            detail.sessions.map { it.toEntity(studentId, priorSessions[it.id]) },
+        )
     }
 
     /** Офлайн-профиль: цели/мастер-план/приглашение недоступны (best-effort). */

@@ -58,6 +58,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.nivel.trainer.domain.Transcript
 import com.nivel.trainer.domain.TranscriptSegment
 import com.nivel.trainer.domain.TranscriptStatus
+import com.nivel.trainer.ui.state.EmptyStateView
 import com.nivel.trainer.ui.state.RefreshOnResume
 import com.nivel.trainer.ui.theme.NivelTheme
 
@@ -105,6 +106,7 @@ fun TranscriptScreen(
         loading = state.loading,
         error = state.error,
         refreshing = state.refreshing,
+        notFound = state.notFound,
         transcript = state.transcript,
         onBack = onBack,
         onRetry = viewModel::refresh,
@@ -123,6 +125,7 @@ private fun TranscriptContent(
     onRetry: () -> Unit,
     modifier: Modifier = Modifier,
     refreshing: Boolean = false,
+    notFound: Boolean = false,
 ) {
     Column(
         modifier = modifier
@@ -152,6 +155,7 @@ private fun TranscriptContent(
                 loading && transcript == null -> CenterBox { CircularProgressIndicator(color = Primary) }
                 error != null && transcript == null -> CenterBox { ErrorState(error, onRetry) }
                 transcript != null -> TranscriptBody(sessionId = sessionId, transcript = transcript)
+                notFound -> EmptyStateView(title = "Запись ещё не расшифрована.", glyph = "🎙")
                 else -> CenterBox { EmptyState() }
             }
         }

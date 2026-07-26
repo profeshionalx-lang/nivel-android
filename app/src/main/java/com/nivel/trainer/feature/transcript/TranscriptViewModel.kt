@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.nivel.trainer.data.repository.TranscriptRepository
 import com.nivel.trainer.domain.Transcript
 import com.nivel.trainer.domain.TranscriptStatus
+import com.nivel.trainer.ui.state.isNetworkError
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -13,6 +14,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import retrofit2.HttpException
 import javax.inject.Inject
 
 /**
@@ -27,6 +29,12 @@ data class TranscriptUiState(
     val error: String? = null,
     /** #71: рефреш поверх уже загруженного транскрипта (pull-to-refresh/возврат на экран). */
     val refreshing: Boolean = false,
+    /**
+     * #75: сервер отдал 404 — запись ещё не расшифрована (аудио не загружено или
+     * очередь STT ещё не подхватила). Это не ошибка — пустое состояние, отдельное
+     * от [error] (сетевой/серверный сбой).
+     */
+    val notFound: Boolean = false,
 )
 
 /**
@@ -75,25 +83,35 @@ class TranscriptViewModel @Inject constructor(
         // или возврат на экран) запустил бы второй цикл опроса параллельно первому.
         loadJob?.cancel()
         val hasData = _uiState.value.transcript != null
-        _uiState.update { it.copy(loading = !hasData, refreshing = hasData, error = null) }
+        _uiState.update { it.copy(loading = !hasData, refreshing = hasData, error = null, notFound = false) }
         loadJob = viewModelScope.launch {
             loadOnce(id)
             pollWhileProcessing(id)
         }
     }
 
-    /** Один запрос: при успехе кладём транскрипт, при сбое — ошибку (если нет данных). */
+    /**
+     * Один запрос: при успехе кладём транскрипт, при сбое — либо пустое состояние
+     * (404 — записи ещё нет), либо ошибку (если нет данных).
+     */
     private suspend fun loadOnce(id: String) {
         repository.getTranscript(id)
             .onSuccess { transcript ->
-                _uiState.update { it.copy(loading = false, refreshing = false, transcript = transcript, error = null) }
+                _uiState.update {
+                    it.copy(loading = false, refreshing = false, transcript = transcript, error = null, notFound = false)
+                }
             }
             .onFailure { e ->
                 _uiState.update { state ->
-                    // Кэша нет: если данных ещё не было — показываем ошибку,
-                    // иначе оставляем последний снимок (сетевой сбой при опросе).
-                    if (state.transcript == null) state.copy(loading = false, refreshing = false, error = mapError(e))
-                    else state.copy(loading = false, refreshing = false)
+                    when {
+                        // Кэша нет, фоновый сбой при опросе/рефреше — оставляем последний снимок.
+                        state.transcript != null -> state.copy(loading = false, refreshing = false)
+                        // #75: 404 — запись ещё не расшифрована, это не ошибка.
+                        e is HttpException && e.code() == 404 ->
+                            state.copy(loading = false, refreshing = false, error = null, notFound = true)
+                        else ->
+                            state.copy(loading = false, refreshing = false, error = mapError(e), notFound = false)
+                    }
                 }
             }
     }
@@ -113,8 +131,11 @@ class TranscriptViewModel @Inject constructor(
         }
     }
 
-    private fun mapError(e: Throwable): String =
-        e.message?.takeIf { it.isNotBlank() } ?: "Что-то пошло не так. Попробуйте снова."
+    private fun mapError(e: Throwable): String = when {
+        isNetworkError(e) -> "Нет подключения к интернету. Проверьте сеть и повторите."
+        e is HttpException && e.code() == 403 -> "Нет доступа к этой сессии."
+        else -> e.message?.takeIf { it.isNotBlank() } ?: "Что-то пошло не так. Попробуйте снова."
+    }
 
     private companion object {
         const val POLL_INTERVAL_MS = 3000L

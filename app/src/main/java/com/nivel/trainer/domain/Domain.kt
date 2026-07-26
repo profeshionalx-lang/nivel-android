@@ -270,3 +270,21 @@ data class LibraryItem(
     val nameRu: String,
     val nameEn: String?,
 )
+
+// --- #78: применение коллекций карточек к сессии ---
+
+/** Коллекция карточек тренера (веб: `/trainer/cards`, вкладка Collections). */
+data class CardCollection(
+    val id: String,
+    val name: String,
+    val cardsCount: Int,
+    val createdAt: String?,
+)
+
+/** Превью карточки коллекции перед применением к сессии (не полный [InsightCard]). */
+data class CollectionCardPreview(
+    val id: String,
+    val title: String?,
+    val body: String?,
+    val tags: List<String>,
+)

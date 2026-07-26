@@ -3,6 +3,7 @@ package com.nivel.trainer.data
 import com.nivel.trainer.data.local.InsightCardEntity
 import com.nivel.trainer.data.local.SessionEntity
 import com.nivel.trainer.data.local.StudentEntity
+import com.nivel.trainer.data.remote.CollectionDto
 import com.nivel.trainer.data.remote.GoalDto
 import com.nivel.trainer.data.remote.MasterPlanDto
 import com.nivel.trainer.data.remote.MasterPlanItemDto
@@ -22,6 +23,8 @@ import com.nivel.trainer.data.remote.StudentSessionDto
 import com.nivel.trainer.data.remote.TrainerOverviewResponse
 import com.nivel.trainer.data.remote.TranscriptResponse
 import com.nivel.trainer.data.remote.TranscriptSegmentDto
+import com.nivel.trainer.domain.CardCollection
+import com.nivel.trainer.domain.CollectionCardPreview
 import com.nivel.trainer.domain.Goal
 import com.nivel.trainer.domain.InsightCard
 import com.nivel.trainer.domain.InviteStatus
@@ -371,4 +374,21 @@ fun SessionInsightCardDto.toEntity(sessionId: String) = InsightCardEntity(
     studentDecision = studentDecision,
     position = position,
     createdAt = createdAt,
+)
+
+// --- #78: применение коллекций карточек к сессии ---
+
+fun CollectionDto.toDomain() = CardCollection(
+    id = id,
+    name = name,
+    cardsCount = cardsCount,
+    createdAt = createdAt,
+)
+
+/** Лёгкое превью карточки коллекции (не полный [InsightCard] — вне контекста сессии). */
+fun SessionInsightCardDto.toPreviewDomain() = CollectionCardPreview(
+    id = id,
+    title = title,
+    body = body,
+    tags = tags ?: emptyList(),
 )

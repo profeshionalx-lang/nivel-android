@@ -282,4 +282,24 @@ interface NivelApi {
     /** Создать упражнение (`POST /api/v1/exercises`, 201). */
     @POST("api/v1/exercises")
     suspend fun createExercise(@Body body: CreateLibraryItemRequest): CreateLibraryItemResponse
+
+    // ---------------------------------------------------------------------------
+    // #78 — применение коллекций карточек к сессии (read NIVEL#226, apply — уже
+    // существовавший write-роут).
+    // ---------------------------------------------------------------------------
+
+    /** Коллекции карточек тренера (`GET /api/v1/collections`). */
+    @GET("api/v1/collections")
+    suspend fun getCollections(): CollectionsResponse
+
+    /** Карточки внутри коллекции — превью перед применением к сессии. Чужая → 403. */
+    @GET("api/v1/collections/{collectionId}/cards")
+    suspend fun getCollectionCards(@Path("collectionId") collectionId: String): CollectionCardsResponse
+
+    /** Применить коллекцию к сессии (`POST /api/v1/collections/{id}/apply`). */
+    @POST("api/v1/collections/{collectionId}/apply")
+    suspend fun applyCollection(
+        @Path("collectionId") collectionId: String,
+        @Body body: ApplyCollectionRequest,
+    ): ApplyCollectionResponse
 }

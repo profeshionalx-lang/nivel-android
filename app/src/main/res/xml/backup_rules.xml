@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    #72: Auto Backup (API 23–30) — исключаем шифрованное хранилище токена и Tink-keyset.
+    Android Keystore-ключи не переживают восстановление на другое/сброшенное устройство —
+    без исключения зашифрованный файл восстановится, а ключ для его расшифровки нет,
+    что привело бы к неустранимой ошибке чтения токена после restore.
+-->
+<full-backup-content>
+    <exclude domain="sharedpref" path="nivel_token_keyset_prefs.xml" />
+    <exclude domain="file" path="datastore/nivel_session_encrypted.pb" />
+    <exclude domain="file" path="datastore/nivel_session.preferences_pb" />
+</full-backup-content>

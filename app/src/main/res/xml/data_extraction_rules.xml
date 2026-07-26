@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- #72: то же самое, что backup_rules.xml, но для API 31+ (cloud-backup + device-transfer). -->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="sharedpref" path="nivel_token_keyset_prefs.xml" />
+        <exclude domain="file" path="datastore/nivel_session_encrypted.pb" />
+        <exclude domain="file" path="datastore/nivel_session.preferences_pb" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="sharedpref" path="nivel_token_keyset_prefs.xml" />
+        <exclude domain="file" path="datastore/nivel_session_encrypted.pb" />
+        <exclude domain="file" path="datastore/nivel_session.preferences_pb" />
+    </device-transfer>
+</data-extraction-rules>

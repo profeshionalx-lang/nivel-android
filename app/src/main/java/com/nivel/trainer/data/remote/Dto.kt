@@ -214,10 +214,10 @@ data class UpdateStudentProfileRequest(
 )
 
 /**
- * Статус приглашения ученика. Шейп по web `getStudentInvite`:
- * `{ token, status: none|pending|claimed|revoked, claimed_at }`.
- * TODO(#Фундамент): GET статуса в `/api/v1` ещё нет — контракт по web-экшену;
- * до появления эндпоинта вызов вернёт 404 и трактуется как «статус неизвестен».
+ * Статус приглашения ученика (#74, реальный роут NIVEL#222):
+ * `{ token, status: none|pending|claimed|revoked, claimed_at }`. 200 всегда,
+ * если ученик существует и доступен тренеру — «нет приглашения» это
+ * `status: "none"`, а не 404.
  */
 @Serializable
 data class StudentInviteResponse(

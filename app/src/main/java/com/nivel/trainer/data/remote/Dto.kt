@@ -555,3 +555,41 @@ data class OverviewPendingSessionDto(
     @SerialName("session_number") val sessionNumber: Int? = null,
     @SerialName("completed_at") val completedAt: String? = null,
 )
+
+// -----------------------------------------------------------------------------
+// E6 (#77) — библиотека навыков и упражнений (поиск + создание, NIVEL#225).
+// -----------------------------------------------------------------------------
+
+/**
+ * Элемент библиотеки — навык или упражнение, одна и та же форма для обоих
+ * (`GET /api/v1/skills`/`/exercises`): `{ id, name_ru, name_en }`.
+ */
+@Serializable
+data class LibraryItemDto(
+    val id: Int,
+    @SerialName("name_ru") val nameRu: String,
+    @SerialName("name_en") val nameEn: String? = null,
+)
+
+@Serializable
+data class SkillsResponse(val skills: List<LibraryItemDto>)
+
+@Serializable
+data class ExercisesResponse(val exercises: List<LibraryItemDto>)
+
+/**
+ * Тело `POST /api/v1/skills`/`/exercises`: `{ nameRu, nameEn? }` — сервер читает
+ * поля camelCase напрямую (`parsed.body?.nameRu`), `@SerialName` не нужен.
+ */
+@Serializable
+data class CreateLibraryItemRequest(
+    val nameRu: String,
+    val nameEn: String? = null,
+)
+
+/** `{ ok: true, id }` — на дубликат имени сервер возвращает id существующей записи, не ошибку. */
+@Serializable
+data class CreateLibraryItemResponse(
+    val ok: Boolean,
+    val id: Int,
+)

@@ -91,6 +91,7 @@ private val TouchTarget = 48.dp
 fun StudentsListScreen(
     onOpenStudent: (String) -> Unit = {},
     onClose: () -> Unit = {},
+    onOpenLibrary: () -> Unit = {},
     modifier: Modifier = Modifier,
     viewModel: StudentsViewModel = hiltViewModel(),
 ) {
@@ -113,6 +114,7 @@ fun StudentsListScreen(
         offline = state.offline,
         onOpenStudent = onOpenStudent,
         onClose = onClose,
+        onOpenLibrary = onOpenLibrary,
         onCreateClick = viewModel::openCreateSheet,
         onRetry = viewModel::refresh,
         modifier = modifier,
@@ -141,6 +143,7 @@ private fun StudentsListContent(
     onCreateClick: () -> Unit,
     onRetry: () -> Unit,
     modifier: Modifier = Modifier,
+    onOpenLibrary: () -> Unit = {},
     showOfflineBanner: Boolean = false,
     offline: Boolean = false,
 ) {
@@ -169,6 +172,12 @@ private fun StudentsListContent(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
+                // E6 (#77) — вход в библиотеку навыков/упражнений. У веба нет ссылки на
+                // эту страницу ни в одной навигации — точку входа выбрали сами (issue #77
+                // явно разрешает: «с домашнего дашборда или из тулбара экрана учеников»).
+                IconButton(onClick = onOpenLibrary, modifier = Modifier.size(TouchTarget)) {
+                    Text("📚", fontSize = 18.sp)
+                }
                 Button(
                     onClick = onCreateClick,
                     modifier = Modifier.heightIn(min = TouchTarget),

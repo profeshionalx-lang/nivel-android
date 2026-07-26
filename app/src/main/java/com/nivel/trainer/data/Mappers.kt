@@ -6,6 +6,7 @@ import com.nivel.trainer.data.local.StudentEntity
 import com.nivel.trainer.data.remote.GoalDto
 import com.nivel.trainer.data.remote.MasterPlanDto
 import com.nivel.trainer.data.remote.MasterPlanItemDto
+import com.nivel.trainer.data.remote.LibraryItemDto
 import com.nivel.trainer.data.remote.MasterPlanSectionDto
 import com.nivel.trainer.data.remote.OverviewPendingSessionDto
 import com.nivel.trainer.data.remote.OverviewUpcomingSessionDto
@@ -24,6 +25,7 @@ import com.nivel.trainer.data.remote.TranscriptSegmentDto
 import com.nivel.trainer.domain.Goal
 import com.nivel.trainer.domain.InsightCard
 import com.nivel.trainer.domain.InviteStatus
+import com.nivel.trainer.domain.LibraryItem
 import com.nivel.trainer.domain.MasterPlan
 import com.nivel.trainer.domain.MasterPlanItem
 import com.nivel.trainer.domain.MasterPlanSection
@@ -348,6 +350,9 @@ fun OverviewPendingSessionDto.toDomain() = OverviewSession(
     sessionNumber = sessionNumber,
     date = completedAt,
 )
+
+/** Элемент библиотеки (E6, #77) → доменная модель. Общий для skills/exercises. */
+fun LibraryItemDto.toDomain() = LibraryItem(id = id, nameRu = nameRu, nameEn = nameEn)
 
 /** Тот же DTO → Room-entity для кэша карточек (B3). `sessionId` из пути. */
 fun SessionInsightCardDto.toEntity(sessionId: String) = InsightCardEntity(

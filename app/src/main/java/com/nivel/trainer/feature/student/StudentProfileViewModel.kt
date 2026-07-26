@@ -14,6 +14,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import retrofit2.HttpException
 import java.time.LocalDateTime
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
@@ -529,6 +530,9 @@ class StudentProfileViewModel @Inject constructor(
     private fun mapError(e: Throwable): String = when {
         // G3 (#32): сетевую ошибку показываем понятной «нет связи» формулировкой.
         isNetworkError(e) -> "Нет подключения к интернету. Проверьте сеть и повторите."
+        // #74: 404/403 на профиле — понятный текст вместо общего «что-то пошло не так».
+        e is HttpException && e.code() == 404 -> "Ученик не найден. Возможно, он был удалён."
+        e is HttpException && e.code() == 403 -> "Нет доступа к этому ученику."
         else -> e.message?.takeIf { it.isNotBlank() } ?: "Что-то пошло не так. Попробуйте снова."
     }
 }

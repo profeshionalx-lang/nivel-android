@@ -103,10 +103,9 @@ interface NivelApi {
     ): OkResponse
 
     /**
-     * Статус приглашения ученика (`GET /api/v1/students/{id}/invite`).
-     * TODO(#Фундамент): GET-эндпоинта статуса в `/api/v1` пока НЕТ — путь/шейп заданы
-     * по web `getStudentInvite`; до появления эндпоинта вызов вернёт 404, репозиторий
-     * трактует это как «статус неизвестен» (best-effort, экран не падает).
+     * Статус приглашения ученика (#74, реальный роут NIVEL#222): `{ token, status,
+     * claimed_at }`. Без приглашения сервер отдаёт `token: null, status: "none"` —
+     * не 404. 200 всегда, если ученик существует и доступен тренеру.
      */
     @GET("api/v1/students/{studentId}/invite")
     suspend fun getStudentInvite(@Path("studentId") studentId: String): StudentInviteResponse

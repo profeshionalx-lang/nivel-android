@@ -555,7 +555,7 @@ private enum class InviteConfirm { REGENERATE, REVOKE }
  * Секция приглашения (порт `InviteBlock`/`InviteBlockClient`): бейдж статуса +
  * действия по статусу. none → создать ссылку; pending → ссылка + копировать +
  * перевыпустить/отозвать; claimed → дата принятия; revoked → только бейдж;
- * unknown (GET статуса ещё не готов) → перевыпустить. Перевыпуск/отзыв
+ * unknown (сбой запроса статуса — редкий edge case, см. #74) → перевыпустить. Перевыпуск/отзыв
  * подтверждаются bottom-sheet'ом (web делает это через `confirm()`).
  */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -611,7 +611,7 @@ private fun InviteSection(
                 onClick = { confirm = InviteConfirm.REGENERATE },
             )
 
-            // unknown — реальный статус недоступен (GET ещё не готов): только перевыпуск,
+            // unknown — запрос статуса не удался (сеть/сервер, #74): только перевыпуск,
             // без слова «создать», чтобы не вводить в заблуждение.
             InviteStatus.UNKNOWN -> {
                 Text(

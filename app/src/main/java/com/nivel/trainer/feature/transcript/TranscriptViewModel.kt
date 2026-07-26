@@ -17,6 +17,9 @@ import kotlinx.coroutines.launch
 import retrofit2.HttpException
 import javax.inject.Inject
 
+/** Аналог-по-серверу действие — сброс и удаление вызывают один и тот же `deleteTranscriptCore`. */
+enum class PendingDestructiveAction { RESET, DELETE }
+
 /**
  * UI-состояние экрана транскрипта (D1).
  * Первый кадр — спиннер; дальше либо транскрипт (любого статуса), либо ошибка
@@ -44,15 +47,36 @@ data class TranscriptUiState(
     val analysisError: String? = null,
     /** Меню действий (bottom-sheet): сброс/удаление/повторный анализ. */
     val actionsSheetOpen: Boolean = false,
-    /** Подтверждение удаления (отдельный bottom-sheet — деструктивное действие). */
-    val confirmDelete: Boolean = false,
+    /**
+     * Подтверждение сброса/удаления — оба вызывают один и тот же деструктивный
+     * `deleteTranscriptCore` на сервере (удаляет строку + аудио-файл безвозвратно),
+     * поэтому оба требуют подтверждения через один и тот же bottom-sheet.
+     */
+    val pendingAction: PendingDestructiveAction? = null,
     val actionInProgress: Boolean = false,
     val actionError: String? = null,
     /** «Анализ поставлен в очередь» — снимается пользователем в UI. */
     val queuedMessage: String? = null,
+    /**
+     * Одноразовый сигнал экрану: сброс/удаление успешно завершились — уходим назад
+     * на карточку сессии, как веб (`resetTranscript`/`deleteTranscript` Server Actions
+     * делают `redirect(/sessions/{id})`, см. `src/lib/actions/audio.ts`). Экран этого
+     * состояния «транскрипта нет» никогда не показывает — веб-страница `/transcript`
+     * сама редиректит прочь, если транскрипта нет (`if (!transcript) redirect(...)`).
+     * Screen обязан вызвать [onNavigatedBack] сразу после навигации, чтобы флаг не
+     * сработал повторно при рекомпозиции.
+     */
+    val navigateBack: Boolean = false,
 ) {
-    /** «Проанализировать заново» доступно только когда расшифровка готова (сервер иначе вернёт 400). */
-    val canRequeueAnalysis: Boolean get() = transcript?.status == TranscriptStatus.READY
+    /**
+     * «Проанализировать заново» доступно только когда расшифровка готова И анализ
+     * ещё не в очереди/не идёт — иначе сервер вернёт 400, а сразу после успешного
+     * requeue (когда локально уже проставлен `analysisStatus = "idle"`) кнопка
+     * оставалась бы активной и повторный тап давал непонятную ошибку.
+     */
+    val canRequeueAnalysis: Boolean
+        get() = transcript?.status == TranscriptStatus.READY &&
+            analysisStatus != "idle" && analysisStatus != "processing"
 }
 
 /**
@@ -180,55 +204,48 @@ class TranscriptViewModel @Inject constructor(
 
     fun closeActionsSheet() = _uiState.update { it.copy(actionsSheetOpen = false) }
 
-    fun requestDelete() = _uiState.update { it.copy(actionsSheetOpen = false, confirmDelete = true) }
+    /**
+     * И «Расшифровать заново», и «Удалить запись» безвозвратно удаляют строку и
+     * аудио-файл на сервере (один и тот же `deleteTranscriptCore`) — оба ведут на
+     * одно и то же подтверждение, а не выполняются по одному тапу.
+     */
+    fun requestAction(action: PendingDestructiveAction) =
+        _uiState.update { it.copy(actionsSheetOpen = false, pendingAction = action) }
 
-    fun cancelDelete() {
+    fun cancelPendingAction() {
         if (_uiState.value.actionInProgress) return
-        _uiState.update { it.copy(confirmDelete = false) }
+        _uiState.update { it.copy(pendingAction = null) }
     }
 
     fun dismissQueuedMessage() = _uiState.update { it.copy(queuedMessage = null) }
 
-    /**
-     * «Расшифровать заново»: сбрасывает упавшую/зависшую расшифровку (удаляет строку
-     * и файл в Storage — тот же `deleteTranscriptCore`, что и удаление). Реального
-     * автозапуска новой расшифровки нет — тренеру нужно заново загрузить аудио на
-     * экране сессии; здесь экран просто возвращается в пустое состояние «запись ещё
-     * не расшифрована», готовое принять новую попытку.
-     */
-    fun resetTranscript() {
-        val id = sessionId ?: return
-        if (_uiState.value.actionInProgress) return
-        loadJob?.cancel()
-        _uiState.update { it.copy(actionsSheetOpen = false, actionInProgress = true, actionError = null) }
-        viewModelScope.launch {
-            repository.resetTranscript(id)
-                .onSuccess {
-                    _uiState.update {
-                        it.copy(
-                            actionInProgress = false, transcript = null, notFound = true,
-                            analysisStatus = null, analysisError = null,
-                        )
-                    }
-                }
-                .onFailure { e -> _uiState.update { it.copy(actionInProgress = false, actionError = mapError(e)) } }
-        }
-    }
+    fun clearActionError() = _uiState.update { it.copy(actionError = null) }
 
-    /** «Удалить запись», подтверждено в bottom-sheet: удаляет строку + аудио-файл. */
-    fun confirmDelete() {
+    /** Screen вызывает сразу после [TranscriptUiState.navigateBack] — гасит одноразовый сигнал. */
+    fun onNavigatedBack() = _uiState.update { it.copy(navigateBack = false) }
+
+    /**
+     * Подтверждено в bottom-sheet: выполняет [TranscriptUiState.pendingAction]. Оба
+     * варианта на сервере — одна и та же деструктивная операция; веб после неё
+     * уходит с этой страницы (`redirect(/sessions/{id})` в `src/lib/actions/audio.ts`
+     * — страница транскрипта на вебе физически не рендерит «транскрипта нет», сама
+     * редиректит прочь). Здесь то же самое через [TranscriptUiState.navigateBack].
+     */
+    fun confirmPendingAction() {
         val id = sessionId ?: return
+        val action = _uiState.value.pendingAction ?: return
         if (_uiState.value.actionInProgress) return
         loadJob?.cancel()
         _uiState.update { it.copy(actionInProgress = true, actionError = null) }
         viewModelScope.launch {
-            repository.deleteTranscript(id)
+            val result = when (action) {
+                PendingDestructiveAction.RESET -> repository.resetTranscript(id)
+                PendingDestructiveAction.DELETE -> repository.deleteTranscript(id)
+            }
+            result
                 .onSuccess {
                     _uiState.update {
-                        it.copy(
-                            actionInProgress = false, confirmDelete = false, transcript = null, notFound = true,
-                            analysisStatus = null, analysisError = null,
-                        )
+                        it.copy(actionInProgress = false, pendingAction = null, navigateBack = true)
                     }
                 }
                 .onFailure { e -> _uiState.update { it.copy(actionInProgress = false, actionError = mapError(e)) } }
@@ -236,9 +253,10 @@ class TranscriptViewModel @Inject constructor(
     }
 
     /**
-     * «Проанализировать заново» — только когда транскрипт `ready` ([TranscriptUiState.canRequeueAnalysis]).
-     * Не мгновенно: демон подхватывает запись сам, поэтому UI лишь подтверждает
-     * постановку в очередь, статус обновится по `RefreshOnResume`/pull-to-refresh.
+     * «Проанализировать заново» — только когда транскрипт `ready` и анализ ещё не
+     * в очереди/не идёт ([TranscriptUiState.canRequeueAnalysis]). Не мгновенно: демон
+     * подхватывает запись сам, UI лишь подтверждает постановку в очередь, статус
+     * обновится по `RefreshOnResume`/pull-to-refresh.
      */
     fun requeueAnalysis() {
         val id = sessionId ?: return

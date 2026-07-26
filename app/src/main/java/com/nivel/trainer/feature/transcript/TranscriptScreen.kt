@@ -105,6 +105,15 @@ fun TranscriptScreen(
     RefreshOnResume(onRefresh = viewModel::refresh)
     val state by viewModel.uiState.collectAsStateWithLifecycle()
 
+    // A9 (#79): сброс/удаление успешно завершились — уходим назад на карточку сессии,
+    // как веб (`redirect(/sessions/{id})` в resetTranscript/deleteTranscript Server Actions).
+    LaunchedEffect(state.navigateBack) {
+        if (state.navigateBack) {
+            onBack()
+            viewModel.onNavigatedBack()
+        }
+    }
+
     TranscriptContent(
         sessionId = sessionId,
         loading = state.loading,
@@ -129,17 +138,19 @@ fun TranscriptScreen(
             canRequeueAnalysis = state.canRequeueAnalysis,
             actionInProgress = state.actionInProgress,
             onDismiss = viewModel::closeActionsSheet,
-            onReset = viewModel::resetTranscript,
+            onReset = { viewModel.requestAction(PendingDestructiveAction.RESET) },
             onRequeue = viewModel::requeueAnalysis,
-            onDeleteClick = viewModel::requestDelete,
+            onDeleteClick = { viewModel.requestAction(PendingDestructiveAction.DELETE) },
         )
     }
 
-    if (state.confirmDelete) {
-        DeleteConfirmSheet(
+    val pendingAction = state.pendingAction
+    if (pendingAction != null) {
+        ConfirmActionSheet(
+            action = pendingAction,
             inProgress = state.actionInProgress,
-            onDismiss = viewModel::cancelDelete,
-            onConfirm = viewModel::confirmDelete,
+            onDismiss = viewModel::cancelPendingAction,
+            onConfirm = viewModel::confirmPendingAction,
         )
     }
 }
@@ -268,8 +279,18 @@ private fun TranscriptBody(
     analysisError: String?,
 ) {
     when (transcript.status) {
-        TranscriptStatus.PROCESSING -> CenterBox { ProcessingState() }
-        TranscriptStatus.FAILED -> CenterBox { FailedState(transcript.errorMessage) }
+        TranscriptStatus.PROCESSING -> CenterBox {
+            Column {
+                ProcessingState()
+                AnalysisStatusLine(analysisStatus = analysisStatus, analysisError = analysisError)
+            }
+        }
+        TranscriptStatus.FAILED -> CenterBox {
+            Column {
+                FailedState(transcript.errorMessage)
+                AnalysisStatusLine(analysisStatus = analysisStatus, analysisError = analysisError)
+            }
+        }
         TranscriptStatus.READY -> ReadyState(
             sessionId = sessionId,
             transcript = transcript,
@@ -664,11 +685,28 @@ private fun ActionRow(label: String, enabled: Boolean, onClick: () -> Unit, colo
     }
 }
 
-/** Подтверждение удаления — деструктивное действие, отдельный bottom-sheet с явным текстом. */
+/**
+ * Подтверждение сброса/удаления — оба деструктивны (один и тот же
+ * `deleteTranscriptCore` на сервере: строка + аудио-файл удаляются безвозвратно),
+ * поэтому оба идут через одно и то же подтверждение, различается только текст.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun DeleteConfirmSheet(inProgress: Boolean, onDismiss: () -> Unit, onConfirm: () -> Unit) {
+private fun ConfirmActionSheet(
+    action: PendingDestructiveAction,
+    inProgress: Boolean,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit,
+) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val title = when (action) {
+        PendingDestructiveAction.RESET -> "Расшифровать заново?"
+        PendingDestructiveAction.DELETE -> "Удалить запись?"
+    }
+    val confirmLabel = when (action) {
+        PendingDestructiveAction.RESET -> if (inProgress) "Сбрасываем…" else "Сбросить"
+        PendingDestructiveAction.DELETE -> if (inProgress) "Удаляем…" else "Удалить"
+    }
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
@@ -682,9 +720,10 @@ private fun DeleteConfirmSheet(inProgress: Boolean, onDismiss: () -> Unit, onCon
                 .padding(bottom = 24.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            Text(text = "Удалить запись?", color = OnSurface, fontWeight = FontWeight.Black)
+            Text(text = title, color = OnSurface, fontWeight = FontWeight.Black)
             Text(
-                text = "Транскрипт и загруженное аудио будут удалены безвозвратно. Отменить это действие нельзя.",
+                text = "Транскрипт и загруженное аудио будут удалены безвозвратно. Отменить это действие нельзя " +
+                    "— для новой расшифровки понадобится заново загрузить аудио на экране сессии.",
                 color = OnSurfaceVariant,
                 fontSize = 13.sp,
             )
@@ -701,7 +740,7 @@ private fun DeleteConfirmSheet(inProgress: Boolean, onDismiss: () -> Unit, onCon
                         disabledContentColor = Color.White,
                     ),
                 ) {
-                    Text(if (inProgress) "Удаляем…" else "Удалить", fontWeight = FontWeight.Bold)
+                    Text(confirmLabel, fontWeight = FontWeight.Bold)
                 }
                 TextButton(
                     onClick = onDismiss,

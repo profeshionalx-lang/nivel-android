@@ -247,4 +247,16 @@ interface NivelApi {
      */
     @POST("api/v1/devices/token")
     suspend fun registerDeviceToken(@Body body: DeviceTokenRequest): OkResponse
+
+    // ---------------------------------------------------------------------------
+    // A6 (#76) — агрегат домашнего экрана тренера.
+    // ---------------------------------------------------------------------------
+
+    /**
+     * Дашборд тренера (`GET /api/v1/trainer/overview`, NIVEL#224): счётчик учеников,
+     * ближайшие тренировки, сессии, ожидающие разбора. Trainer-only, дёшево и быстро
+     * устаревает — репозиторий не кэширует в Room.
+     */
+    @GET("api/v1/trainer/overview")
+    suspend fun getTrainerOverview(): TrainerOverviewResponse
 }

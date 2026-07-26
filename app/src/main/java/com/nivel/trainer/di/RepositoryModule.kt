@@ -5,10 +5,12 @@ import com.nivel.trainer.data.repository.DefaultSessionDetailRepository
 import com.nivel.trainer.data.repository.DefaultStudentProfileRepository
 import com.nivel.trainer.data.repository.DefaultStudentRepository
 import com.nivel.trainer.data.repository.DefaultTranscriptRepository
+import com.nivel.trainer.data.repository.DefaultTrainerOverviewRepository
 import com.nivel.trainer.data.repository.InsightsRepository
 import com.nivel.trainer.data.repository.SessionDetailRepository
 import com.nivel.trainer.data.repository.StudentProfileRepository
 import com.nivel.trainer.data.repository.StudentRepository
+import com.nivel.trainer.data.repository.TrainerOverviewRepository
 import com.nivel.trainer.data.repository.TranscriptRepository
 import dagger.Binds
 import dagger.Module
@@ -45,4 +47,11 @@ abstract class RepositoryModule {
     @Binds
     @Singleton
     abstract fun bindTranscriptRepository(impl: DefaultTranscriptRepository): TranscriptRepository
+
+    // A6 (#76) — агрегат домашнего экрана тренера.
+    @Binds
+    @Singleton
+    abstract fun bindTrainerOverviewRepository(
+        impl: DefaultTrainerOverviewRepository,
+    ): TrainerOverviewRepository
 }

@@ -7,6 +7,7 @@ import com.nivel.trainer.data.toDomain
 import com.nivel.trainer.data.toEntity
 import com.nivel.trainer.domain.ShadowStudent
 import com.nivel.trainer.domain.Student
+import com.nivel.trainer.domain.TrainerOverview
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import javax.inject.Inject
@@ -62,5 +63,25 @@ class DefaultStudentRepository @Inject constructor(
             dao.replaceAll(api.getStudents().students.map { it.toEntity() })
         }
         response.toDomain()
+    }
+}
+
+/**
+ * Репозиторий домашнего экрана тренера (A6, #76): `GET /api/v1/trainer/overview`.
+ * Точечное чтение без Room-кэша — как [StudentProfileRepository]/[TranscriptRepository]:
+ * агрегат дешёвый и быстро устаревает (тренер возвращается сюда после каждого разбора),
+ * тянуть его заново дешевле, чем поддерживать кэш в актуальном состоянии.
+ */
+interface TrainerOverviewRepository {
+    suspend fun getOverview(): Result<TrainerOverview>
+}
+
+@Singleton
+class DefaultTrainerOverviewRepository @Inject constructor(
+    private val api: NivelApi,
+) : TrainerOverviewRepository {
+
+    override suspend fun getOverview(): Result<TrainerOverview> = runCatching {
+        api.getTrainerOverview().toDomain()
     }
 }

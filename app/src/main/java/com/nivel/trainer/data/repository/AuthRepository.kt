@@ -4,6 +4,8 @@ import com.nivel.trainer.data.local.NivelDatabase
 import com.nivel.trainer.data.local.TokenStore
 import com.nivel.trainer.data.remote.NivelApi
 import com.nivel.trainer.data.remote.TokenRequest
+import com.nivel.trainer.push.PushTokenRegistrar
+import com.nivel.trainer.push.PushTokenScheduler
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
@@ -25,6 +27,8 @@ class AuthRepository @Inject constructor(
     private val api: NivelApi,
     private val tokenStore: TokenStore,
     private val database: NivelDatabase,
+    private val pushTokenRegistrar: PushTokenRegistrar,
+    private val pushTokenScheduler: PushTokenScheduler,
 ) {
     /** true, если bearer-токен уже сохранён (используется сплэшем для выбора экрана). */
     val isLoggedIn: Flow<Boolean> = tokenStore.bearerToken.map { !it.isNullOrBlank() }
@@ -40,14 +44,22 @@ class AuthRepository @Inject constructor(
     suspend fun loginWithFirebaseIdToken(idToken: String, claimToken: String? = null) {
         val response = api.exchangeToken(TokenRequest(idToken = idToken, claimToken = claimToken))
         tokenStore.saveToken(response.token)
+        // #80: гарантированная регистрация push-токена даже если логин случился без
+        // сети — прямой best-effort вызов из MainActivity в этом случае не повторится.
+        pushTokenScheduler.enqueueAfterLogin()
     }
 
     /**
      * Logout: чистит bearer-токен и весь Room-кэш (`students`/`sessions`/`insight_cards`).
      * #72: без очистки кэша следующий тренер, вошедший на этом устройстве, увидел бы
      * учеников предыдущего — дыра в приватности, не косметика.
+     *
+     * #80: локально забываем FCM-токен устройства — иначе следующий тренер на этом же
+     * устройстве получал бы пуши предыдущего (тот же физический токен под другим
+     * `user_id` в `device_tokens`, пока FCM не выдаст новый).
      */
     suspend fun logout() {
+        pushTokenRegistrar.forgetLocalToken()
         tokenStore.clear()
         withContext(Dispatchers.IO) { database.clearAllTables() }
     }

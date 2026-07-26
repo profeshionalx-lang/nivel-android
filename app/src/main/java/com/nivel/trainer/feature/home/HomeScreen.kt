@@ -65,7 +65,6 @@ import java.util.Locale
 private val Background = Color(0xFF0E0E0E)
 private val SurfaceCard = Color(0xFF1E1E1E)
 private val Primary = Color(0xFFCAFD00)
-private val OnPrimary = Color(0xFF000000)
 private val Secondary = Color(0xFF7CC6FE)
 private val OnSurface = Color(0xFFF5F5F5)
 private val OnSurfaceVariant = Color(0xFFADAAAA)
@@ -442,15 +441,18 @@ private fun LogoutConfirmSheet(
     }
 }
 
-// --- Форматирование дат (как в вебе: UTC, ru-RU) ---
+// --- Форматирование дат (веб форматирует стенные часы в Europe/Madrid, см.
+// src/lib/time/madrid.ts и DashboardView.tsx — не UTC, иначе время разъедется
+// с тем, что видит тот же тренер в браузере) ---
 
 private val RuLocale = Locale("ru", "RU")
+private val MadridZone: java.time.ZoneId = java.time.ZoneId.of("Europe/Madrid")
 private val TIME_FMT: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm", RuLocale)
 private val DATE_FMT: DateTimeFormatter = DateTimeFormatter.ofPattern("d MMMM", RuLocale)
 
 /** «Понедельник, 14:00» — предстоящая тренировка ([OverviewSession.date] = scheduled_at). */
 private fun formatScheduledLabel(session: OverviewSession): String {
-    val dt = parseUtc(session.date) ?: return "—"
+    val dt = parseUtc(session.date)?.atZoneSameInstant(MadridZone) ?: return "—"
     val weekday = dt.dayOfWeek.getDisplayName(JavaTimeTextStyle.FULL_STANDALONE, RuLocale)
         .replaceFirstChar { it.uppercase(RuLocale) }
     return "$weekday, ${dt.format(TIME_FMT)}"
@@ -458,11 +460,12 @@ private fun formatScheduledLabel(session: OverviewSession): String {
 
 /** «Завершено 5 июня» — сессия ждёт разбора ([OverviewSession.date] = completed_at). */
 private fun formatCompletedLabel(session: OverviewSession): String {
-    val dt = parseUtc(session.date) ?: return "Завершено"
+    val dt = parseUtc(session.date)?.atZoneSameInstant(MadridZone) ?: return "Завершено"
     return "Завершено ${dt.format(DATE_FMT)}"
 }
 
-/** Парсит ISO-строку времени в UTC (сервер отдаёт с/без зоны) — как на других экранах. */
+/** Парсит ISO-строку времени в UTC-instant (сервер отдаёт с/без зоны); зону
+ * стенных часов (Europe/Madrid) применяет вызывающий код перед форматированием. */
 private fun parseUtc(raw: String?): OffsetDateTime? {
     val value = raw?.trim()?.takeIf { it.isNotEmpty() } ?: return null
     return runCatching { OffsetDateTime.parse(value).withOffsetSameInstant(ZoneOffset.UTC) }

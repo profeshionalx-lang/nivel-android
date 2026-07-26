@@ -25,14 +25,18 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -101,6 +105,15 @@ fun TranscriptScreen(
     RefreshOnResume(onRefresh = viewModel::refresh)
     val state by viewModel.uiState.collectAsStateWithLifecycle()
 
+    // A9 (#79): сброс/удаление успешно завершились — уходим назад на карточку сессии,
+    // как веб (`redirect(/sessions/{id})` в resetTranscript/deleteTranscript Server Actions).
+    LaunchedEffect(state.navigateBack) {
+        if (state.navigateBack) {
+            onBack()
+            viewModel.onNavigatedBack()
+        }
+    }
+
     TranscriptContent(
         sessionId = sessionId,
         loading = state.loading,
@@ -108,10 +121,38 @@ fun TranscriptScreen(
         refreshing = state.refreshing,
         notFound = state.notFound,
         transcript = state.transcript,
+        analysisStatus = state.analysisStatus,
+        analysisError = state.analysisError,
+        actionError = state.actionError,
+        queuedMessage = state.queuedMessage,
         onBack = onBack,
         onRetry = viewModel::refresh,
+        onActionsClick = viewModel::openActionsSheet,
+        onDismissQueuedMessage = viewModel::dismissQueuedMessage,
         modifier = modifier,
     )
+
+    if (state.actionsSheetOpen) {
+        ActionsMenuSheet(
+            transcriptStatus = state.transcript?.status,
+            canRequeueAnalysis = state.canRequeueAnalysis,
+            actionInProgress = state.actionInProgress,
+            onDismiss = viewModel::closeActionsSheet,
+            onReset = { viewModel.requestAction(PendingDestructiveAction.RESET) },
+            onRequeue = viewModel::requeueAnalysis,
+            onDeleteClick = { viewModel.requestAction(PendingDestructiveAction.DELETE) },
+        )
+    }
+
+    val pendingAction = state.pendingAction
+    if (pendingAction != null) {
+        ConfirmActionSheet(
+            action = pendingAction,
+            inProgress = state.actionInProgress,
+            onDismiss = viewModel::cancelPendingAction,
+            onConfirm = viewModel::confirmPendingAction,
+        )
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -126,13 +167,27 @@ private fun TranscriptContent(
     modifier: Modifier = Modifier,
     refreshing: Boolean = false,
     notFound: Boolean = false,
+    analysisStatus: String? = null,
+    analysisError: String? = null,
+    actionError: String? = null,
+    queuedMessage: String? = null,
+    onActionsClick: () -> Unit = {},
+    onDismissQueuedMessage: () -> Unit = {},
 ) {
     Column(
         modifier = modifier
             .fillMaxSize()
             .background(Background),
     ) {
-        Header(onBack = onBack)
+        // A9 (#79): меню действий доступно только когда есть что сбрасывать/удалять/анализировать.
+        Header(onBack = onBack, onActionsClick = if (transcript != null) onActionsClick else null)
+
+        if (queuedMessage != null) {
+            InlineBanner(message = queuedMessage, glyph = "⏳", onDismiss = onDismissQueuedMessage)
+        }
+        if (actionError != null) {
+            InlineBanner(message = actionError, glyph = "⚠", color = ErrorColor, onDismiss = onDismissQueuedMessage)
+        }
 
         // #71: pull-to-refresh — рефреш поверх уже загруженного транскрипта, без спиннера.
         val pullState = rememberPullToRefreshState()
@@ -154,7 +209,12 @@ private fun TranscriptContent(
             when {
                 loading && transcript == null -> CenterBox { CircularProgressIndicator(color = Primary) }
                 error != null && transcript == null -> CenterBox { ErrorState(error, onRetry) }
-                transcript != null -> TranscriptBody(sessionId = sessionId, transcript = transcript)
+                transcript != null -> TranscriptBody(
+                    sessionId = sessionId,
+                    transcript = transcript,
+                    analysisStatus = analysisStatus,
+                    analysisError = analysisError,
+                )
                 notFound -> EmptyStateView(title = "Запись ещё не расшифрована.", glyph = "🎙")
                 else -> CenterBox { EmptyState() }
             }
@@ -162,9 +222,9 @@ private fun TranscriptContent(
     }
 }
 
-/** Хедер как glass-nav веба: назад «‹» + заголовок «Транскрипт». */
+/** Хедер как glass-nav веба: назад «‹» + заголовок «Транскрипт» + меню действий «⋮» (A9, #79). */
 @Composable
-private fun Header(onBack: () -> Unit) {
+private fun Header(onBack: () -> Unit, onActionsClick: (() -> Unit)? = null) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -183,16 +243,92 @@ private fun Header(onBack: () -> Unit) {
             fontSize = 18.sp,
             fontWeight = FontWeight.Black,
             fontStyle = FontStyle.Italic,
+            modifier = Modifier.weight(1f),
         )
+        if (onActionsClick != null) {
+            IconButton(onClick = onActionsClick, modifier = Modifier.size(TouchTarget)) {
+                Text("⋮", color = OnSurface, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+            }
+        }
+    }
+}
+
+/** Ненавязчивый инлайн-баннер (очередь анализа / ошибка действия) с закрытием по тапу. */
+@Composable
+private fun InlineBanner(message: String, glyph: String, onDismiss: () -> Unit, color: Color = OnSurface) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 4.dp)
+            .background(SurfaceCard, RoundedCornerShape(12.dp))
+            .clickable(onClick = onDismiss)
+            .padding(12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(glyph, fontSize = 14.sp)
+        Spacer(Modifier.width(8.dp))
+        Text(text = message, color = color, fontSize = 12.sp, modifier = Modifier.weight(1f))
     }
 }
 
 @Composable
-private fun TranscriptBody(sessionId: String, transcript: Transcript) {
+private fun TranscriptBody(
+    sessionId: String,
+    transcript: Transcript,
+    analysisStatus: String?,
+    analysisError: String?,
+) {
     when (transcript.status) {
-        TranscriptStatus.PROCESSING -> CenterBox { ProcessingState() }
-        TranscriptStatus.FAILED -> CenterBox { FailedState(transcript.errorMessage) }
-        TranscriptStatus.READY -> ReadyState(sessionId = sessionId, transcript = transcript)
+        TranscriptStatus.PROCESSING -> CenterBox {
+            Column {
+                ProcessingState()
+                AnalysisStatusLine(analysisStatus = analysisStatus, analysisError = analysisError)
+            }
+        }
+        TranscriptStatus.FAILED -> CenterBox {
+            Column {
+                FailedState(transcript.errorMessage)
+                AnalysisStatusLine(analysisStatus = analysisStatus, analysisError = analysisError)
+            }
+        }
+        TranscriptStatus.READY -> ReadyState(
+            sessionId = sessionId,
+            transcript = transcript,
+            analysisStatus = analysisStatus,
+            analysisError = analysisError,
+        )
+    }
+}
+
+/**
+ * Статус анализа (A9, #79) — отдельная строка от статуса расшифровки, со своей
+ * ошибкой. Показывается только когда есть что показать (готовый транскрипт — до
+ * этого анализ ещё не запускался).
+ */
+@Composable
+private fun AnalysisStatusLine(analysisStatus: String?, analysisError: String?) {
+    if (analysisStatus == null) return
+    val label = when (analysisStatus) {
+        "ready" -> "Анализ готов"
+        "processing" -> "Анализ выполняется…"
+        "idle" -> "Анализ в очереди"
+        "failed" -> "Ошибка анализа"
+        else -> return
+    }
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 24.dp, vertical = 4.dp),
+    ) {
+        Text(
+            text = label,
+            color = if (analysisStatus == "failed") ErrorColor else OnSurfaceVariant,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Bold,
+        )
+        if (analysisStatus == "failed" && !analysisError.isNullOrBlank()) {
+            Text(text = analysisError, color = OnSurfaceVariant, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+        }
     }
 }
 
@@ -260,10 +396,17 @@ private fun FailedState(errorMessage: String?) {
 
 /** Готовый транскрипт: табы + содержимое + действия (скачать/копировать). */
 @Composable
-private fun ReadyState(sessionId: String, transcript: Transcript) {
+private fun ReadyState(
+    sessionId: String,
+    transcript: Transcript,
+    analysisStatus: String? = null,
+    analysisError: String? = null,
+) {
     var tab by remember { mutableStateOf(TranscriptTab.SEGMENTS) }
 
     Column(modifier = Modifier.fillMaxSize()) {
+        AnalysisStatusLine(analysisStatus = analysisStatus, analysisError = analysisError)
+
         // Табы — повторяют веб (По сегментам / Сплошной текст).
         Row(
             modifier = Modifier
@@ -474,6 +617,141 @@ private fun EmptyState() {
 @Composable
 private fun CenterBox(content: @Composable () -> Unit) {
     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { content() }
+}
+
+// --- A9 (#79): меню действий и подтверждение удаления ---
+
+/**
+ * Bottom-sheet меню действий (mobile-first — не dropdown в углу). «Расшифровать
+ * заново» показываем только при упавшей расшифровке (issue #79: сценарий
+ * восстановления после сбоя); «Проанализировать заново» — только когда транскрипт
+ * готов (иначе сервер вернёт 400); «Удалить запись» — деструктивно, отделено цветом
+ * и ведёт на отдельное подтверждение, а не удаляет сразу.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ActionsMenuSheet(
+    transcriptStatus: TranscriptStatus?,
+    canRequeueAnalysis: Boolean,
+    actionInProgress: Boolean,
+    onDismiss: () -> Unit,
+    onReset: () -> Unit,
+    onRequeue: () -> Unit,
+    onDeleteClick: () -> Unit,
+) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = SurfaceCard,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .widthIn(max = 430.dp)
+                .padding(horizontal = 8.dp)
+                .padding(bottom = 24.dp),
+        ) {
+            if (transcriptStatus == TranscriptStatus.FAILED) {
+                ActionRow(label = "Расшифровать заново", enabled = !actionInProgress, onClick = onReset)
+            }
+            ActionRow(
+                label = "Проанализировать заново",
+                enabled = !actionInProgress && canRequeueAnalysis,
+                onClick = onRequeue,
+            )
+            ActionRow(
+                label = "Удалить запись",
+                enabled = !actionInProgress,
+                color = ErrorColor,
+                onClick = onDeleteClick,
+            )
+        }
+    }
+}
+
+@Composable
+private fun ActionRow(label: String, enabled: Boolean, onClick: () -> Unit, color: Color = OnSurface) {
+    val alpha = if (enabled) 1f else 0.4f
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(enabled = enabled, onClick = onClick)
+            .heightIn(min = TouchTarget)
+            .padding(horizontal = 16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(text = label, color = color.copy(alpha = alpha), fontSize = 14.sp, fontWeight = FontWeight.Bold)
+    }
+}
+
+/**
+ * Подтверждение сброса/удаления — оба деструктивны (один и тот же
+ * `deleteTranscriptCore` на сервере: строка + аудио-файл удаляются безвозвратно),
+ * поэтому оба идут через одно и то же подтверждение, различается только текст.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ConfirmActionSheet(
+    action: PendingDestructiveAction,
+    inProgress: Boolean,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit,
+) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val title = when (action) {
+        PendingDestructiveAction.RESET -> "Расшифровать заново?"
+        PendingDestructiveAction.DELETE -> "Удалить запись?"
+    }
+    val confirmLabel = when (action) {
+        PendingDestructiveAction.RESET -> if (inProgress) "Сбрасываем…" else "Сбросить"
+        PendingDestructiveAction.DELETE -> if (inProgress) "Удаляем…" else "Удалить"
+    }
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = SurfaceCard,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .widthIn(max = 430.dp)
+                .padding(horizontal = 24.dp)
+                .padding(bottom = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            Text(text = title, color = OnSurface, fontWeight = FontWeight.Black)
+            Text(
+                text = "Транскрипт и загруженное аудио будут удалены безвозвратно. Отменить это действие нельзя " +
+                    "— для новой расшифровки понадобится заново загрузить аудио на экране сессии.",
+                color = OnSurfaceVariant,
+                fontSize = 13.sp,
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(
+                    onClick = onConfirm,
+                    enabled = !inProgress,
+                    modifier = Modifier.weight(1f).heightIn(min = TouchTarget),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = ErrorColor,
+                        contentColor = Color.White,
+                        disabledContainerColor = ErrorColor.copy(alpha = 0.4f),
+                        disabledContentColor = Color.White,
+                    ),
+                ) {
+                    Text(confirmLabel, fontWeight = FontWeight.Bold)
+                }
+                TextButton(
+                    onClick = onDismiss,
+                    enabled = !inProgress,
+                    modifier = Modifier.weight(1f).heightIn(min = TouchTarget),
+                ) {
+                    Text("Отмена", color = OnSurface, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+    }
 }
 
 // --- Логика подсветки / форматирования (как в вебе TranscriptView) ---

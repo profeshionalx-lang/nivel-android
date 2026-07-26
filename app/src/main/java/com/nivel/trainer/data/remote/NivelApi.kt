@@ -206,6 +206,34 @@ interface NivelApi {
     suspend fun getTranscript(@Path("sessionId") sessionId: String): TranscriptResponse
 
     // ---------------------------------------------------------------------------
+    // A9 (#79) — управление транскриптом: сброс, удаление, requeue анализа (NIVEL#227).
+    // ---------------------------------------------------------------------------
+
+    /**
+     * Сбросить транскрипт (`POST /api/v1/sessions/{id}/transcript/reset`) — удаляет
+     * строку `transcripts` и файл в Storage, тренер грузит аудио заново. Идемпотентен.
+     */
+    @POST("api/v1/sessions/{sessionId}/transcript/reset")
+    suspend fun resetTranscript(@Path("sessionId") sessionId: String): OkResponse
+
+    /**
+     * Удалить транскрипт (`DELETE /api/v1/sessions/{id}/transcript`) — тот же
+     * `deleteTranscriptCore`, что и reset. После вызова `GET .../transcript` → 404.
+     * Идемпотентен.
+     */
+    @DELETE("api/v1/sessions/{sessionId}/transcript")
+    suspend fun deleteTranscript(@Path("sessionId") sessionId: String): OkResponse
+
+    /**
+     * Поставить анализ в очередь заново (`POST /api/v1/sessions/{id}/insights/requeue`).
+     * 400, если транскрипт не `ready`/пустой или анализ уже в очереди/идёт — сервер
+     * отдаёт `{ error }` вместо `{ ok }`, поэтому доступность действия в UI завязана
+     * на статус транскрипта (только когда `ready`), а не полагается на код ответа.
+     */
+    @POST("api/v1/sessions/{sessionId}/insights/requeue")
+    suspend fun requeueAnalysis(@Path("sessionId") sessionId: String): OkResponse
+
+    // ---------------------------------------------------------------------------
     // D5 (#23) — завершить разбор тренировки: фиксируем ревью и уведомляем ученика.
     // ---------------------------------------------------------------------------
 

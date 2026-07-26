@@ -106,6 +106,17 @@ data class TokenResponse(
     val expiresIn: Long,
 )
 
+/**
+ * Тело ошибки `POST /api/v1/auth/token` (422): `{ error: "claim_<code>" }` —
+ * `ClaimError` из `src/lib/auth/session.ts` (invalid_token/expired/already_claimed/
+ * email_collision/uid_collision), либо `auth_failed`/`Missing idToken` для остальных
+ * сбоев (#81 — понятное сообщение вместо мусорного токена).
+ */
+@Serializable
+data class AuthErrorResponse(
+    val error: String? = null,
+)
+
 /** Профиль пользователя из сессии (SessionUser в `src/lib/auth/session.ts`). */
 @Serializable
 data class SessionUserDto(

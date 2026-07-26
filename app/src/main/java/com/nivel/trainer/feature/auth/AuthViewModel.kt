@@ -3,6 +3,7 @@ package com.nivel.trainer.feature.auth
 import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.nivel.trainer.data.remote.AuthErrorResponse
 import com.nivel.trainer.data.repository.AuthRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -10,6 +11,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.serialization.json.Json
+import retrofit2.HttpException
 import java.security.SecureRandom
 import javax.inject.Inject
 
@@ -40,6 +43,7 @@ data class AuthUiState(
 @HiltViewModel
 class AuthViewModel @Inject constructor(
     private val authRepository: AuthRepository,
+    private val json: Json,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(AuthUiState())
@@ -147,8 +151,31 @@ class AuthViewModel @Inject constructor(
         _uiState.update { it.copy(error = null) }
     }
 
-    private fun mapError(e: Throwable): String =
-        e.message?.takeIf { it.isNotBlank() } ?: "Не удалось войти. Попробуйте снова."
+    /**
+     * #81: `POST /api/v1/auth/token` возвращает 422 `{ error: "claim_<code>" }` для
+     * невалидной/просроченной/уже использованной claim-ссылки (`ClaimError` в
+     * `src/lib/auth/session.ts`). Показываем те же формулировки, что веб-страница
+     * `/invite/[token]` — тренер и ученик видят одинаковый текст на обеих платформах.
+     */
+    private fun mapError(e: Throwable): String {
+        if (e is HttpException) {
+            val body = runCatching { e.response()?.errorBody()?.string() }.getOrNull()
+            val code = body?.takeIf { it.isNotBlank() }
+                ?.let { runCatching { json.decodeFromString<AuthErrorResponse>(it) }.getOrNull() }
+                ?.error
+            claimErrorMessage(code)?.let { return it }
+        }
+        return e.message?.takeIf { it.isNotBlank() } ?: "Не удалось войти. Попробуйте снова."
+    }
+
+    private fun claimErrorMessage(code: String?): String? = when (code) {
+        "claim_invalid_token" -> "Ссылка-приглашение недействительна."
+        "claim_expired" -> "Срок действия приглашения истёк. Попросите тренера выпустить новую ссылку."
+        "claim_already_claimed" -> "Это приглашение уже использовано. Войдите обычным способом."
+        "claim_email_collision", "claim_uid_collision" ->
+            "Этот аккаунт уже привязан к другому профилю Nivel."
+        else -> null
+    }
 
     private fun randomCsrf(): String {
         val bytes = ByteArray(16)

@@ -49,6 +49,27 @@
                     android:host="auth"
                     android:path="/callback" />
             </intent-filter>
+
+            <!-- #81: App Link ссылки-приглашения ученика (claimUrl из
+                 POST /api/v1/students — `${NIVEL_URL}/invite/{token}`, веб-роут
+                 src/app/invite/[token]/page.tsx). autoVerify=true запрошено, но
+                 реально сработает только после публикации /.well-known/assetlinks.json
+                 на домене (репо NIVEL) с отпечатком RELEASE-подписи — её в этом
+                 репозитории пока нет (`./gradlew signingReport` не даёт release-ключ,
+                 см. app/build.gradle.kts). До этого явный adb VIEW всё равно
+                 резолвится в приложение (единственный матч intent-filter'а), только
+                 без автоматической браузер→приложение верификации на реальных
+                 установках. Остальные пути домена intent-filter не ловит — уходят
+                 в браузер, как и требует acceptance. -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data
+                    android:scheme="https"
+                    android:host="${nivelHost}"
+                    android:pathPrefix="/invite" />
+            </intent-filter>
         </activity>
 
         <!-- Foreground-сервис фоновой записи тренировки (C1). Не экспортируется —

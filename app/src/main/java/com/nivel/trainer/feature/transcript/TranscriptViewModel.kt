@@ -104,11 +104,14 @@ class TranscriptViewModel @Inject constructor(
             .onFailure { e ->
                 _uiState.update { state ->
                     when {
-                        // Кэша нет, фоновый сбой при опросе/рефреше — оставляем последний снимок.
-                        state.transcript != null -> state.copy(loading = false, refreshing = false)
-                        // #75: 404 — запись ещё не расшифрована, это не ошибка.
+                        // #75: 404 — строки транскрипта больше нет (не создавалась либо
+                        // пропала между опросами, например запись удалили). Проверяем
+                        // ПЕРЕД "есть данные" — иначе poll на processing-экране после
+                        // удаления записи навсегда завис бы на старом снимке.
                         e is HttpException && e.code() == 404 ->
-                            state.copy(loading = false, refreshing = false, error = null, notFound = true)
+                            state.copy(loading = false, refreshing = false, transcript = null, error = null, notFound = true)
+                        // Данные есть, фоновый сбой (сеть/сервер) при опросе/рефреше — оставляем последний снимок.
+                        state.transcript != null -> state.copy(loading = false, refreshing = false)
                         else ->
                             state.copy(loading = false, refreshing = false, error = mapError(e), notFound = false)
                     }

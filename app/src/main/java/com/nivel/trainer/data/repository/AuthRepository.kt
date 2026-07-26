@@ -1,11 +1,14 @@
 package com.nivel.trainer.data.repository
 
+import com.nivel.trainer.data.local.NivelDatabase
 import com.nivel.trainer.data.local.TokenStore
 import com.nivel.trainer.data.remote.NivelApi
 import com.nivel.trainer.data.remote.TokenRequest
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.withContext
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -21,6 +24,7 @@ import javax.inject.Singleton
 class AuthRepository @Inject constructor(
     private val api: NivelApi,
     private val tokenStore: TokenStore,
+    private val database: NivelDatabase,
 ) {
     /** true, если bearer-токен уже сохранён (используется сплэшем для выбора экрана). */
     val isLoggedIn: Flow<Boolean> = tokenStore.bearerToken.map { !it.isNullOrBlank() }
@@ -38,8 +42,13 @@ class AuthRepository @Inject constructor(
         tokenStore.saveToken(response.token)
     }
 
-    /** Logout: чистит bearer-токен. Следующие запросы пойдут без авторизации. */
+    /**
+     * Logout: чистит bearer-токен и весь Room-кэш (`students`/`sessions`/`insight_cards`).
+     * #72: без очистки кэша следующий тренер, вошедший на этом устройстве, увидел бы
+     * учеников предыдущего — дыра в приватности, не косметика.
+     */
     suspend fun logout() {
         tokenStore.clear()
+        withContext(Dispatchers.IO) { database.clearAllTables() }
     }
 }

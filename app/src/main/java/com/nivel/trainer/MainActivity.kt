@@ -65,6 +65,12 @@ class MainActivity : ComponentActivity() {
      * проброшен в [com.nivel.trainer.feature.auth.LoginScreen]. Устанавливается
      * только если пользователь ещё НЕ залогинен (см. [handleInviteLink]) — иначе
      * ссылку молча проглотили бы, ничего не изменив на экране логина.
+     *
+     * Обнуляется, как только `LoginScreen` применил его к своему `AuthViewModel`
+     * (см. `onClaimTokenConsumed` в [NivelRoot]/`NivelNavHost`). Без этого один и
+     * тот же токен пережил бы логаут: `AuthViewModel` пересоздаётся при каждом
+     * новом заходе на LOGIN (`popUpTo(0)`), и стухший/уже использованный claim
+     * молча подмешался бы в совершенно не связанный повторный вход.
      */
     private val inviteClaimToken: MutableState<String?> = mutableStateOf(null)
 
@@ -103,6 +109,7 @@ class MainActivity : ComponentActivity() {
                 onPushDeepLinkConsumed = { pushDeepLink.value = null },
                 logoutSignal = logoutSignal.value,
                 inviteClaimToken = inviteClaimToken.value,
+                onInviteClaimTokenConsumed = { inviteClaimToken.value = null },
             )
         }
     }
@@ -197,6 +204,7 @@ private fun NivelRoot(
     onPushDeepLinkConsumed: () -> Unit,
     logoutSignal: Int = 0,
     inviteClaimToken: String? = null,
+    onInviteClaimTokenConsumed: () -> Unit = {},
 ) {
     NivelTheme {
         val navController = rememberNavController()
@@ -223,6 +231,7 @@ private fun NivelRoot(
                 pushDeepLink = pushDeepLink,
                 onPushDeepLinkConsumed = onPushDeepLinkConsumed,
                 inviteClaimToken = inviteClaimToken,
+                onInviteClaimTokenConsumed = onInviteClaimTokenConsumed,
                 modifier = Modifier.padding(innerPadding)
             )
         }

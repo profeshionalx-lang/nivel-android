@@ -56,11 +56,15 @@
                  реально сработает только после публикации /.well-known/assetlinks.json
                  на домене (репо NIVEL) с отпечатком RELEASE-подписи — её в этом
                  репозитории пока нет (`./gradlew signingReport` не даёт release-ключ,
-                 см. app/build.gradle.kts). До этого явный adb VIEW всё равно
-                 резолвится в приложение (единственный матч intent-filter'а), только
-                 без автоматической браузер→приложение верификации на реальных
-                 установках. Остальные пути домена intent-filter не ловит — уходят
-                 в браузер, как и требует acceptance. -->
+                 см. app/build.gradle.kts). До assetlinks.json ссылка на реальном
+                 устройстве (тап в WhatsApp/SMS) вероятно уйдёт в браузер, а не в
+                 приложение — Android не верифицирует домен без него. Проверять этот
+                 intent-filter нужно ЯВНЫМ intent'ом (`adb shell am start -n
+                 com.nivel.trainer/.MainActivity -a android.intent.action.VIEW -d
+                 "https://…/invite/<token>"`), а не implicit `-a VIEW -d <url>` без
+                 `-n` — implicit версия на реальном устройстве с браузером по
+                 умолчанию тоже, скорее всего, откроет браузер. Остальные пути домена
+                 intent-filter не ловит — уходят в браузер, как и требует acceptance. -->
             <intent-filter android:autoVerify="true">
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />

@@ -62,6 +62,7 @@ fun NivelNavHost(
     onPushDeepLinkConsumed: () -> Unit = {},
     /** Claim-токен из App Link приглашения (#81), см. `MainActivity.handleInviteLink`. */
     inviteClaimToken: String? = null,
+    onInviteClaimTokenConsumed: () -> Unit = {},
 ) {
     // Тап по push-уведомлению: nivel://session/{id} или nivel://student/{id} →
     // навигируем на соответствующий экран. host=auth обрабатывается отдельно (вход).
@@ -106,6 +107,7 @@ fun NivelNavHost(
                     }
                 },
                 claimToken = inviteClaimToken,
+                onClaimTokenConsumed = onInviteClaimTokenConsumed,
                 authCallbackUri = authCallbackUri,
                 onAuthCallbackConsumed = onAuthCallbackConsumed,
             )

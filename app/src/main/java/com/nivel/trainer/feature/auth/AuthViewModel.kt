@@ -174,6 +174,9 @@ class AuthViewModel @Inject constructor(
         "claim_already_claimed" -> "Это приглашение уже использовано. Войдите обычным способом."
         "claim_email_collision", "claim_uid_collision" ->
             "Этот аккаунт уже привязан к другому профилю Nivel."
+        // firebase_invalid — не про саму claim-ссылку (сбой проверки Firebase ID
+        // token), но приходит тем же `claim_<code>` конвертом при попытке claim'а.
+        "claim_firebase_invalid" -> "Не удалось подтвердить вход. Попробуйте снова."
         else -> null
     }
 

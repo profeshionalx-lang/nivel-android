@@ -44,6 +44,9 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
+import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -78,6 +81,7 @@ import com.nivel.trainer.domain.Problem
 import com.nivel.trainer.domain.StudentInvite
 import com.nivel.trainer.domain.StudentProfile
 import com.nivel.trainer.domain.StudentSession
+import com.nivel.trainer.ui.state.RefreshOnResume
 import com.nivel.trainer.ui.theme.NivelTheme
 import kotlinx.coroutines.delay
 import java.time.OffsetDateTime
@@ -123,11 +127,13 @@ fun StudentProfileScreen(
     viewModel: StudentProfileViewModel = hiltViewModel(),
 ) {
     LaunchedEffect(studentId) { viewModel.load(studentId) }
+    RefreshOnResume(onRefresh = viewModel::refresh)
     val state by viewModel.uiState.collectAsStateWithLifecycle()
 
     StudentProfileContent(
         loading = state.loading,
         error = state.error,
+        refreshing = state.refreshing,
         profile = state.profile,
         editing = state.editing,
         inviteBusy = state.inviteBusy,
@@ -191,10 +197,12 @@ fun StudentProfileScreen(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun StudentProfileContent(
     loading: Boolean,
     error: String?,
+    refreshing: Boolean,
     profile: StudentProfile?,
     goalCreator: GoalCreatorState,
     masterPlanState: MasterPlanEditorState,
@@ -229,32 +237,50 @@ private fun StudentProfileContent(
     ) {
         Header(onBack = onBack)
 
-        when {
-            loading && profile == null -> CenterBox { CircularProgressIndicator(color = Primary) }
+        // #71: pull-to-refresh — рефреш поверх уже загруженного профиля, без спиннера.
+        val pullState = rememberPullToRefreshState()
+        PullToRefreshBox(
+            isRefreshing = refreshing,
+            onRefresh = onRetry,
+            modifier = Modifier.fillMaxSize(),
+            state = pullState,
+            indicator = {
+                PullToRefreshDefaults.Indicator(
+                    modifier = Modifier.align(Alignment.TopCenter),
+                    isRefreshing = refreshing,
+                    state = pullState,
+                    containerColor = SurfaceCard,
+                    color = Primary,
+                )
+            },
+        ) {
+            when {
+                loading && profile == null -> CenterBox { CircularProgressIndicator(color = Primary) }
 
-            error != null && profile == null -> CenterBox { ErrorState(error, onRetry) }
+                error != null && profile == null -> CenterBox { ErrorState(error, onRetry) }
 
-            profile != null -> ProfileBody(
-                profile = profile,
-                editing = editing,
-                inviteBusy = inviteBusy,
-                actionError = actionError,
-                onOpenSession = onOpenSession,
-                onStartEdit = onStartEdit,
-                onEditName = onEditName,
-                onEditAvatar = onEditAvatar,
-                onSaveEdit = onSaveEdit,
-                onCancelEdit = onCancelEdit,
-                onRegenerate = onRegenerate,
-                onRevoke = onRevoke,
-                onDismissActionError = onDismissActionError,
-                onCreateSession = onCreateSession,
-                onAddGoal = onAddGoal,
-                masterPlanState = masterPlanState,
-                masterPlanActions = masterPlanActions,
-            )
+                profile != null -> ProfileBody(
+                    profile = profile,
+                    editing = editing,
+                    inviteBusy = inviteBusy,
+                    actionError = actionError,
+                    onOpenSession = onOpenSession,
+                    onStartEdit = onStartEdit,
+                    onEditName = onEditName,
+                    onEditAvatar = onEditAvatar,
+                    onSaveEdit = onSaveEdit,
+                    onCancelEdit = onCancelEdit,
+                    onRegenerate = onRegenerate,
+                    onRevoke = onRevoke,
+                    onDismissActionError = onDismissActionError,
+                    onCreateSession = onCreateSession,
+                    onAddGoal = onAddGoal,
+                    masterPlanState = masterPlanState,
+                    masterPlanActions = masterPlanActions,
+                )
 
-            else -> CenterBox { EmptyState() }
+                else -> CenterBox { EmptyState() }
+            }
         }
     }
 
@@ -1845,6 +1871,7 @@ private fun StudentProfilePreview() {
         StudentProfileContent(
             loading = false,
             error = null,
+            refreshing = false,
             profile = previewProfile,
             goalCreator = GoalCreatorState(),
             masterPlanState = MasterPlanEditorState(),
@@ -1870,6 +1897,7 @@ private fun StudentProfileEmptyPreview() {
         StudentProfileContent(
             loading = false,
             error = null,
+            refreshing = false,
             profile = previewProfile.copy(goals = emptyList(), sessions = emptyList(), masterPlan = null),
             goalCreator = GoalCreatorState(),
             masterPlanState = MasterPlanEditorState(),

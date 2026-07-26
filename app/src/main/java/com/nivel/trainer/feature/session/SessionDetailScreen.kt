@@ -38,6 +38,9 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
+import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -66,6 +69,7 @@ import com.nivel.trainer.domain.SessionAudioStatus
 import com.nivel.trainer.domain.SessionDetail
 import com.nivel.trainer.domain.SessionOverview
 import com.nivel.trainer.service.upload.UploadStage
+import com.nivel.trainer.ui.state.RefreshOnResume
 import com.nivel.trainer.ui.theme.NivelTheme
 import kotlinx.coroutines.delay
 import java.time.OffsetDateTime
@@ -108,6 +112,7 @@ fun SessionDetailScreen(
     viewModel: SessionDetailViewModel = hiltViewModel(),
 ) {
     LaunchedEffect(sessionId) { viewModel.load(sessionId) }
+    RefreshOnResume(onRefresh = viewModel::refresh)
     val state by viewModel.uiState.collectAsStateWithLifecycle()
 
     // Авто-анализ запускает серверный аналайзер по готовому транскрипту (как pm2 в
@@ -121,7 +126,7 @@ fun SessionDetailScreen(
         ) {
             while (true) {
                 delay(POLL_INTERVAL_MS)
-                viewModel.refresh()
+                viewModel.pollRefresh()
             }
         }
     }
@@ -136,7 +141,7 @@ fun SessionDetailScreen(
         if (uploadActive && audio == null) {
             while (true) {
                 delay(POLL_INTERVAL_MS)
-                viewModel.refresh()
+                viewModel.pollRefresh()
             }
         }
     }
@@ -144,6 +149,7 @@ fun SessionDetailScreen(
     SessionDetailContent(
         loading = state.loading,
         error = state.error,
+        refreshing = state.refreshing,
         overview = state.overview,
         generating = state.generating,
         generateError = state.generateError,
@@ -179,6 +185,7 @@ fun SessionDetailScreen(
 /** Период поллинга статуса авто-анализа (как `setInterval(3000)` в вебе). */
 private const val POLL_INTERVAL_MS = 3_000L
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun SessionDetailContent(
     loading: Boolean,
@@ -187,6 +194,7 @@ private fun SessionDetailContent(
     onBack: () -> Unit,
     onRetry: () -> Unit,
     modifier: Modifier = Modifier,
+    refreshing: Boolean = false,
     generating: Boolean = false,
     generateError: String? = null,
     uploadStage: UploadStage = UploadStage.None,
@@ -215,28 +223,46 @@ private fun SessionDetailContent(
             com.nivel.trainer.ui.state.OfflineBanner(onRetry = onRetry)
         }
 
-        when {
-            loading && overview == null -> CenterBox { CircularProgressIndicator(color = Primary) }
+        // #71: pull-to-refresh — рефреш поверх уже загруженного обзора, без спиннера.
+        val pullState = rememberPullToRefreshState()
+        PullToRefreshBox(
+            isRefreshing = refreshing,
+            onRefresh = onRetry,
+            modifier = Modifier.fillMaxSize(),
+            state = pullState,
+            indicator = {
+                PullToRefreshDefaults.Indicator(
+                    modifier = Modifier.align(Alignment.TopCenter),
+                    isRefreshing = refreshing,
+                    state = pullState,
+                    containerColor = SurfaceCard,
+                    color = Primary,
+                )
+            },
+        ) {
+            when {
+                loading && overview == null -> CenterBox { CircularProgressIndicator(color = Primary) }
 
-            error != null && overview == null -> CenterBox { ErrorState(error, onRetry) }
+                error != null && overview == null -> CenterBox { ErrorState(error, onRetry) }
 
-            overview != null -> SessionBody(
-                overview = overview,
-                generating = generating,
-                generateError = generateError,
-                uploadStage = uploadStage,
-                completingReview = completingReview,
-                cards = reorderedCards ?: overview.cards,
-                onGenerate = onGenerate,
-                onOpenPaste = onOpenPaste,
-                onRecord = onRecord,
-                onRetryUpload = onRetryUpload,
-                onCompleteReview = onCompleteReview,
-                onMoveCard = onMoveCard,
-                onCardDragEnd = onCardDragEnd,
-            )
+                overview != null -> SessionBody(
+                    overview = overview,
+                    generating = generating,
+                    generateError = generateError,
+                    uploadStage = uploadStage,
+                    completingReview = completingReview,
+                    cards = reorderedCards ?: overview.cards,
+                    onGenerate = onGenerate,
+                    onOpenPaste = onOpenPaste,
+                    onRecord = onRecord,
+                    onRetryUpload = onRetryUpload,
+                    onCompleteReview = onCompleteReview,
+                    onMoveCard = onMoveCard,
+                    onCardDragEnd = onCardDragEnd,
+                )
 
-            else -> CenterBox { EmptyState() }
+                else -> CenterBox { EmptyState() }
+            }
         }
     }
 

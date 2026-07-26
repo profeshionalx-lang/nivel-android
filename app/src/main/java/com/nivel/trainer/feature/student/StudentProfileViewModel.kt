@@ -48,6 +48,8 @@ data class StudentProfileUiState(
     val loading: Boolean = true,
     val profile: StudentProfile? = null,
     val error: String? = null,
+    /** #71: рефреш поверх уже загруженного профиля (pull-to-refresh/возврат на экран). */
+    val refreshing: Boolean = false,
     /** E3 — инлайн-правка профиля; null = режим просмотра. */
     val editing: ProfileEditState? = null,
     /** E3 — идёт действие с приглашением (перевыпуск/отзыв). */
@@ -117,27 +119,38 @@ class StudentProfileViewModel @Inject constructor(
     private var studentId: String? = null
 
     /**
-     * Вызывается экраном с id из навигации. Идемпотентна: для уже принятого id
-     * повторные вызовы (recompose, возврат на экран) не перезапускают загрузку.
-     * Повтор после ошибки — через [refresh] (кнопка «Повторить»).
+     * Вызывается экраном с id из навигации. #71: больше не идемпотентна — вызов для уже
+     * принятого id тоже перезапрашивает данные (возврат на экран, pull-to-refresh), только
+     * без полноэкранного спиннера поверх уже показанного профиля (см. [refresh]).
      */
     fun load(studentId: String) {
-        if (this.studentId == studentId) return
         this.studentId = studentId
         refresh()
     }
 
-    /** Тянет профиль с сервера; ошибку показываем с возможностью повтора. */
+    /**
+     * Тянет профиль с сервера. Если данные уже на экране — рефреш идёт незаметно
+     * ([StudentProfileUiState.refreshing], профиль остаётся видимым); иначе — полноэкранный
+     * спиннер ([StudentProfileUiState.loading]). Ошибку первичной загрузки показываем с
+     * «Повторить»; ошибку фонового рефреша — молча (данные на экране уже валидны).
+     */
     fun refresh() {
         val id = studentId ?: return
-        _uiState.update { it.copy(loading = true, error = null) }
+        val hasData = _uiState.value.profile != null
+        _uiState.update { it.copy(loading = !hasData, refreshing = hasData, error = null) }
         viewModelScope.launch {
             repository.getProfile(id)
                 .onSuccess { profile ->
-                    _uiState.update { it.copy(loading = false, profile = profile, error = null) }
+                    _uiState.update { it.copy(loading = false, refreshing = false, profile = profile, error = null) }
                 }
                 .onFailure { e ->
-                    _uiState.update { it.copy(loading = false, error = mapError(e)) }
+                    _uiState.update { state ->
+                        state.copy(
+                            loading = false,
+                            refreshing = false,
+                            error = if (state.profile == null) mapError(e) else null,
+                        )
+                    }
                 }
         }
     }

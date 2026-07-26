@@ -40,6 +40,8 @@ data class SessionDetailUiState(
     val loading: Boolean = true,
     val overview: SessionOverview? = null,
     val error: String? = null,
+    /** #71: рефреш поверх уже загруженного обзора (pull-to-refresh/возврат на экран). */
+    val refreshing: Boolean = false,
     /** D2 — шит ручной вставки инсайтов. */
     val pasteSheet: PasteSheetState = PasteSheetState.Closed,
     /** D2 — идёт авто-генерация (LLM инлайн), показываем спиннер-статус. */
@@ -92,14 +94,14 @@ class SessionDetailViewModel @Inject constructor(
     private var sessionId: String? = null
 
     /**
-     * Вызывается экраном с id из навигации. Идемпотентна: для уже принятого id
-     * повторные вызовы (recompose, возврат на экран) не перезапускают загрузку.
-     * Повтор после ошибки — через [refresh] (кнопка «Повторить»).
+     * Вызывается экраном с id из навигации. #71: больше не идемпотентна — вызов для уже
+     * принятого id тоже перезапрашивает данные (возврат на экран, pull-to-refresh), только
+     * без полноэкранного спиннера поверх уже показанного обзора (см. [refresh]).
      */
     fun load(sessionId: String) {
-        if (this.sessionId == sessionId) return
+        val isNewId = this.sessionId != sessionId
         this.sessionId = sessionId
-        observeUpload(sessionId)
+        if (isNewId) observeUpload(sessionId)
         refresh()
     }
 
@@ -123,29 +125,56 @@ class SessionDetailViewModel @Inject constructor(
         uploadScheduler.retry(id, filePath)
     }
 
-    /** Тянет состояние сессии с сервера; ошибку показываем с возможностью повтора. */
+    /**
+     * Тянет состояние сессии с сервера. Если обзор уже на экране — рефреш идёт незаметно
+     * ([SessionDetailUiState.refreshing]); иначе — полноэкранный спиннер ([loading]).
+     * Ошибку первичной загрузки показываем с «Повторить»; ошибку фонового рефреша — молча.
+     * Источник вызова — пользователь (pull-to-refresh, возврат на экран, кнопка «Повторить»).
+     */
     fun refresh() {
         val id = sessionId ?: return
-        _uiState.update { it.copy(loading = true, error = null) }
-        viewModelScope.launch {
-            repository.getOverview(id)
-                .onSuccess { overview ->
-                    // Если сервер уже довёл анализ до ready — снимаем прежнюю ошибку генерации.
-                    val clearGenError = overview.audio?.analysisStatus == "ready"
-                    _uiState.update {
-                        it.copy(
-                            loading = false,
-                            overview = overview,
-                            error = null,
-                            generateError = if (clearGenError) null else it.generateError,
-                            isOffline = overview.isStale, // G3: флаг кэша
-                        )
-                    }
+        val hasData = _uiState.value.overview != null
+        _uiState.update { it.copy(loading = !hasData, refreshing = hasData, error = null) }
+        viewModelScope.launch { fetchOverview(id) }
+    }
+
+    /**
+     * #71: тихий автополлинг (заливка/анализ, см. [SessionDetailScreen]) — обновляет данные
+     * без [SessionDetailUiState.loading]/[refreshing], иначе pull-to-refresh индикатор мигал бы
+     * каждые несколько секунд, пока идёт заливка или анализ.
+     */
+    fun pollRefresh() {
+        val id = sessionId ?: return
+        viewModelScope.launch { fetchOverview(id) }
+    }
+
+    private suspend fun fetchOverview(id: String) {
+        repository.getOverview(id)
+            .onSuccess { overview ->
+                // Если сервер уже довёл анализ до ready — снимаем прежнюю ошибку генерации.
+                val clearGenError = overview.audio?.analysisStatus == "ready"
+                _uiState.update {
+                    it.copy(
+                        loading = false,
+                        refreshing = false,
+                        overview = overview,
+                        error = null,
+                        generateError = if (clearGenError) null else it.generateError,
+                        isOffline = overview.isStale, // G3: флаг кэша
+                    )
                 }
-                .onFailure { e ->
-                    _uiState.update { it.copy(loading = false, error = mapError(e)) }
+            }
+            .onFailure { e ->
+                _uiState.update { state ->
+                    // Тихий автополлинг (уже был overview): не подменяем видимую ошибку,
+                    // просто гасим индикаторы, если они были включены явным refresh().
+                    state.copy(
+                        loading = false,
+                        refreshing = false,
+                        error = if (state.overview == null) mapError(e) else state.error,
+                    )
                 }
-        }
+            }
     }
 
     // --- D2: ручная вставка инсайтов ---

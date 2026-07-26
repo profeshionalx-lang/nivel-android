@@ -34,6 +34,9 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
+import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -55,6 +58,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.nivel.trainer.domain.ShadowStudent
 import com.nivel.trainer.domain.Student
 import com.nivel.trainer.ui.state.OfflineBanner
+import com.nivel.trainer.ui.state.RefreshOnResume
 import com.nivel.trainer.ui.theme.NivelTheme
 
 // Цвета взяты один-в-один из веб-Nivel (src/app/globals.css), как и на экране входа (B2).
@@ -89,6 +93,7 @@ fun StudentsListScreen(
     modifier: Modifier = Modifier,
     viewModel: StudentsViewModel = hiltViewModel(),
 ) {
+    RefreshOnResume(onRefresh = viewModel::refresh)
     val state by viewModel.uiState.collectAsStateWithLifecycle()
 
     StudentsListContent(
@@ -97,6 +102,7 @@ fun StudentsListScreen(
         error = state.error,
         isEmpty = state.isEmpty,
         showOfflineBanner = state.showOfflineBanner,
+        offline = state.offline,
         onOpenStudent = onOpenStudent,
         onClose = onClose,
         onCreateClick = viewModel::openCreateSheet,
@@ -115,6 +121,7 @@ fun StudentsListScreen(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun StudentsListContent(
     students: List<Student>,
@@ -127,6 +134,7 @@ private fun StudentsListContent(
     onRetry: () -> Unit,
     modifier: Modifier = Modifier,
     showOfflineBanner: Boolean = false,
+    offline: Boolean = false,
 ) {
     Column(
         modifier = modifier
@@ -172,32 +180,54 @@ private fun StudentsListContent(
             }
         }
 
-        // G3 (#32): оффлайн-баннер поверх кэша — сеть упала, но данные есть.
+        // #71: баннер поверх кэша при любой неудаче рефреша — не только сетевой.
         if (showOfflineBanner) {
-            OfflineBanner(onRetry = onRetry)
+            OfflineBanner(
+                onRetry = onRetry,
+                message = if (offline) "Нет сети — показаны сохранённые данные" else "Не удалось обновить",
+            )
         }
 
-        when {
-            // Спиннер только при пустом кэше — иначе показываем кэш мгновенно.
-            refreshing && students.isEmpty() && error == null -> CenterBox {
-                CircularProgressIndicator(color = Primary)
-            }
+        // #71: pull-to-refresh — переиспользует state.refreshing (тот же индикатор, что и
+        // первичная загрузка при пустом кэше).
+        val pullState = rememberPullToRefreshState()
+        PullToRefreshBox(
+            isRefreshing = refreshing,
+            onRefresh = onRetry,
+            modifier = Modifier.fillMaxSize(),
+            state = pullState,
+            indicator = {
+                PullToRefreshDefaults.Indicator(
+                    modifier = Modifier.align(Alignment.TopCenter),
+                    isRefreshing = refreshing,
+                    state = pullState,
+                    containerColor = SurfaceCard,
+                    color = Primary,
+                )
+            },
+        ) {
+            when {
+                // Спиннер только при пустом кэше — иначе показываем кэш мгновенно.
+                refreshing && students.isEmpty() && error == null -> CenterBox {
+                    CircularProgressIndicator(color = Primary)
+                }
 
-            error != null && students.isEmpty() -> CenterBox {
-                ErrorState(message = error, onRetry = onRetry)
-            }
+                error != null && students.isEmpty() -> CenterBox {
+                    ErrorState(message = error, onRetry = onRetry)
+                }
 
-            isEmpty -> CenterBox { EmptyState() }
+                isEmpty -> CenterBox { EmptyState() }
 
-            else -> LazyColumn(
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(
-                    start = 16.dp, end = 16.dp, top = 8.dp, bottom = 32.dp,
-                ),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                items(students, key = { it.id }) { student ->
-                    StudentRow(student = student, onClick = { onOpenStudent(student.id) })
+                else -> LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(
+                        start = 16.dp, end = 16.dp, top = 8.dp, bottom = 32.dp,
+                    ),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    items(students, key = { it.id }) { student ->
+                        StudentRow(student = student, onClick = { onOpenStudent(student.id) })
+                    }
                 }
             }
         }

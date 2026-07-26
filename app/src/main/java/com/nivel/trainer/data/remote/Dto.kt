@@ -74,20 +74,9 @@ data class ShadowStudentResponse(
     val expiresAt: String? = null,
 )
 
-/** Тренировочная сессия ученика. Источник — `sessions`. */
-@Serializable
-data class SessionDto(
-    val id: String,
-    @SerialName("goal_id") val goalId: String? = null,
-    @SerialName("session_number") val sessionNumber: Int,
-    @SerialName("trainer_notes") val trainerNotes: String? = null,
-    @SerialName("student_insight") val studentInsight: String? = null,
-    val status: String,
-    @SerialName("trainer_review_completed") val trainerReviewCompleted: Boolean = false,
-    @SerialName("scheduled_at") val scheduledAt: String? = null,
-    @SerialName("completed_at") val completedAt: String? = null,
-    @SerialName("created_at") val createdAt: String? = null,
-)
+// SessionDto (полный DTO сессии, source: GET /students/{id}/sessions) удалён вместе
+// с самим эндпоинтом (#73) — кэш сессий профиля теперь строится из StudentSessionDto,
+// который эндпоинт `GET /students/{id}` и так возвращает.
 
 // Инсайт-карточки сессии приходят из `…/insight-cards` в обёртке `{ cards }`
 // без session_id/student_id/trainer_id — их DTO определён ниже как

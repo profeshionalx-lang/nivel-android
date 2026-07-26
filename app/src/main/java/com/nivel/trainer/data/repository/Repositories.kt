@@ -1,16 +1,12 @@
 package com.nivel.trainer.data.repository
 
-import com.nivel.trainer.data.local.InsightCardDao
-import com.nivel.trainer.data.local.SessionDao
 import com.nivel.trainer.data.local.StudentDao
 import com.nivel.trainer.data.remote.CreateStudentRequest
 import com.nivel.trainer.data.remote.NivelApi
 import com.nivel.trainer.data.toDomain
 import com.nivel.trainer.data.toEntity
-import com.nivel.trainer.domain.InsightCard
 import com.nivel.trainer.domain.ShadowStudent
 import com.nivel.trainer.domain.Student
-import com.nivel.trainer.domain.TrainingSession
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import javax.inject.Inject
@@ -43,16 +39,6 @@ interface StudentRepository {
     suspend fun createShadowStudent(fullName: String): Result<ShadowStudent>
 }
 
-interface SessionRepository {
-    fun observeSessions(studentId: String): Flow<List<TrainingSession>>
-    suspend fun refreshSessions(studentId: String): Result<Unit>
-}
-
-interface InsightCardRepository {
-    fun observeCards(sessionId: String): Flow<List<InsightCard>>
-    suspend fun refreshCards(sessionId: String): Result<Unit>
-}
-
 @Singleton
 class DefaultStudentRepository @Inject constructor(
     private val api: NivelApi,
@@ -76,36 +62,5 @@ class DefaultStudentRepository @Inject constructor(
             dao.replaceAll(api.getStudents().students.map { it.toEntity() })
         }
         response.toDomain()
-    }
-}
-
-@Singleton
-class DefaultSessionRepository @Inject constructor(
-    private val api: NivelApi,
-    private val dao: SessionDao,
-) : SessionRepository {
-
-    override fun observeSessions(studentId: String): Flow<List<TrainingSession>> =
-        dao.observeByStudent(studentId).map { list -> list.map { it.toDomain() } }
-
-    override suspend fun refreshSessions(studentId: String): Result<Unit> = runCatching {
-        val remote = api.getStudentSessions(studentId)
-        dao.replaceForStudent(studentId, remote.map { it.toEntity(studentId) })
-    }
-}
-
-@Singleton
-class DefaultInsightCardRepository @Inject constructor(
-    private val api: NivelApi,
-    private val dao: InsightCardDao,
-) : InsightCardRepository {
-
-    override fun observeCards(sessionId: String): Flow<List<InsightCard>> =
-        dao.observeBySession(sessionId).map { list -> list.map { it.toDomain() } }
-
-    override suspend fun refreshCards(sessionId: String): Result<Unit> = runCatching {
-        // Эндпоинт `…/insight-cards` отдаёт обёртку `{ cards }`; sessionId — из пути.
-        val remote = api.getSessionCards(sessionId).cards
-        dao.replaceForSession(sessionId, remote.map { it.toEntity(sessionId) })
     }
 }

@@ -1,13 +1,19 @@
 package com.nivel.trainer.data.repository
 
 import com.nivel.trainer.BuildConfig
+import com.nivel.trainer.data.local.SessionDao
+import com.nivel.trainer.data.local.StudentDao
+import com.nivel.trainer.data.local.StudentEntity
 import com.nivel.trainer.data.remote.AddMasterPlanItemRequest
 import com.nivel.trainer.data.remote.AddMasterPlanSectionRequest
 import com.nivel.trainer.data.remote.CreateGoalRequest
 import com.nivel.trainer.data.remote.CreateSessionForStudentRequest
 import com.nivel.trainer.data.remote.NivelApi
+import com.nivel.trainer.data.remote.StudentDetailResponse
 import com.nivel.trainer.data.remote.UpdateStudentProfileRequest
 import com.nivel.trainer.data.toDomain
+import com.nivel.trainer.data.toEntity
+import com.nivel.trainer.data.toStudentSession
 import com.nivel.trainer.domain.InviteStatus
 import com.nivel.trainer.domain.Problem
 import com.nivel.trainer.domain.StudentInvite
@@ -22,9 +28,14 @@ import javax.inject.Singleton
  * Просмотр (B5): базовая инфо + цели + сессии + мастер-план + статус приглашения.
  * Управление (E3): правка профиля, перевыпуск/отзыв приглашения.
  *
- * Точечный экран чтения, без Room-кэша: источник правды — сервер. `detail`,
- * `master-plan` и статус приглашения грузятся параллельно; план и приглашение —
- * best-effort (их сбой/отсутствие не роняют профиль).
+ * Источник правды — сервер. `detail`, `master-plan` и статус приглашения грузятся
+ * параллельно; план и приглашение — best-effort (их сбой/отсутствие не роняют профиль).
+ *
+ * G3/#73: офлайн-кэш по образцу [DefaultSessionDetailRepository] — успех сети кэширует
+ * базовую инфо (`students`, тот же кэш что и список) и сессии (`sessions`, тот же кэш что
+ * и карточка тренировки); сбой сети падает на кэш с [StudentProfile.isStale]=true. Цели,
+ * мастер-план и статус приглашения не кэшируются (best-effort, как аудио-статус в
+ * [SessionOverview] — офлайн они просто недоступны, профиль всё равно показывается).
  *
  * E2 (#25): здесь же справочник проблем и создание цели ученику.
  */
@@ -96,25 +107,95 @@ interface StudentProfileRepository {
 @Singleton
 class DefaultStudentProfileRepository @Inject constructor(
     private val api: NivelApi,
+    private val studentDao: StudentDao,
+    private val sessionDao: SessionDao,
 ) : StudentProfileRepository {
 
-    override suspend fun getProfile(studentId: String): Result<StudentProfile> = runCatching {
-        coroutineScope {
-            val detailDeferred = async { api.getStudentDetail(studentId) }
-            // Мастер-план — best-effort: его отсутствие/сбой не должны ронять профиль.
-            val planDeferred = async {
-                runCatching { api.getStudentMasterPlan(studentId).plan }.getOrNull()
-            }
-            // Статус приглашения — best-effort: GET-эндпоинт ещё не готов (см. NivelApi
-            // TODO), 404/сбой → UNKNOWN (а не null), чтобы секция приглашения всё равно
-            // показывалась и тренер мог перевыпустить ссылку до появления реального GET.
-            val inviteDeferred = async {
-                runCatching { api.getStudentInvite(studentId).toDomain(BuildConfig.API_BASE_URL) }
-                    .getOrDefault(StudentInvite(InviteStatus.UNKNOWN, null, null))
-            }
-            val detail = detailDeferred.await()
-            detail.toDomain(planDeferred.await(), inviteDeferred.await())
+    override suspend fun getProfile(studentId: String): Result<StudentProfile> {
+        val networkResult = runCatching { fetchFromNetwork(studentId) }
+        if (networkResult.isSuccess) {
+            val profile = networkResult.getOrThrow()
+            runCatching { cacheProfile(studentId, profile.detail) }
+            return Result.success(profile.domain)
         }
+
+        val cached = runCatching { loadFromCache(studentId) }.getOrNull()
+        if (cached != null) {
+            return Result.success(cached.copy(isStale = true))
+        }
+
+        return Result.failure(
+            networkResult.exceptionOrNull()
+                ?: RuntimeException("Нет данных — проверьте соединение"),
+        )
+    }
+
+    // --- Приватные хелперы (#73: офлайн-кэш) ---
+
+    /** Сеть + сырой detail-DTO (для кэша), чтобы не запрашивать его дважды. */
+    private class NetworkProfile(val domain: StudentProfile, val detail: StudentDetailResponse)
+
+    private suspend fun fetchFromNetwork(studentId: String): NetworkProfile = coroutineScope {
+        val detailDeferred = async { api.getStudentDetail(studentId) }
+        // Мастер-план — best-effort: его отсутствие/сбой не должны ронять профиль.
+        val planDeferred = async {
+            runCatching { api.getStudentMasterPlan(studentId).plan }.getOrNull()
+        }
+        // Статус приглашения — best-effort: GET-эндпоинт ещё не готов (см. NivelApi
+        // TODO), 404/сбой → UNKNOWN (а не null), чтобы секция приглашения всё равно
+        // показывалась и тренер мог перевыпустить ссылку до появления реального GET.
+        val inviteDeferred = async {
+            runCatching { api.getStudentInvite(studentId).toDomain(BuildConfig.API_BASE_URL) }
+                .getOrDefault(StudentInvite(InviteStatus.UNKNOWN, null, null))
+        }
+        val detail = detailDeferred.await()
+        NetworkProfile(detail.toDomain(planDeferred.await(), inviteDeferred.await()), detail)
+    }
+
+    /**
+     * Кэширует базовую инфо ученика (та же таблица `students`, что и список — счётчик
+     * `totalSessions`/`createdAt` в detail-ответе нет, сохраняем то, что уже было в кэше;
+     * `activeGoals`, если кэша ещё не было, считаем по тем же целям, что пришли в этом
+     * ответе, — точнее, чем дефолт 0) и его сессии (та же таблица `sessions`, что и
+     * карточка тренировки, — при обновлении сохраняем поля, которые мог заполнить
+     * [SessionDetailRepository]).
+     */
+    private suspend fun cacheProfile(studentId: String, detail: StudentDetailResponse) {
+        val existing = studentDao.getById(studentId)
+        studentDao.upsertAll(
+            listOf(
+                StudentEntity(
+                    id = studentId,
+                    fullName = detail.fullName,
+                    email = detail.email,
+                    avatarUrl = detail.avatarUrl,
+                    activeGoals = existing?.activeGoals
+                        ?: detail.goals.count { it.status == "active" },
+                    totalSessions = existing?.totalSessions ?: detail.sessions.size,
+                    createdAt = existing?.createdAt,
+                ),
+            ),
+        )
+        val priorSessions = sessionDao.getByStudent(studentId).associateBy { it.id }
+        sessionDao.replaceForStudent(
+            studentId,
+            detail.sessions.map { it.toEntity(studentId, priorSessions[it.id]) },
+        )
+    }
+
+    /** Офлайн-профиль: цели/мастер-план/приглашение недоступны (best-effort). */
+    private suspend fun loadFromCache(studentId: String): StudentProfile? {
+        val entity = studentDao.getById(studentId) ?: return null
+        return StudentProfile(
+            id = entity.id,
+            fullName = entity.fullName,
+            email = entity.email,
+            avatarUrl = entity.avatarUrl,
+            goals = emptyList(),
+            sessions = sessionDao.getByStudent(studentId).map { it.toStudentSession() },
+            masterPlan = null,
+            invite = null,
+        )
     }
 
     override suspend fun updateProfile(

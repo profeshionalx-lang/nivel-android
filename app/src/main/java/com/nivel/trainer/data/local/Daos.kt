@@ -21,6 +21,10 @@ interface StudentDao {
     @Query("SELECT * FROM students ORDER BY createdAt DESC")
     fun observeAll(): Flow<List<StudentEntity>>
 
+    /** #73: разовое чтение одного ученика из кэша (offline-профиль). */
+    @Query("SELECT * FROM students WHERE id = :studentId LIMIT 1")
+    suspend fun getById(studentId: String): StudentEntity?
+
     @Upsert
     suspend fun upsertAll(students: List<StudentEntity>)
 
@@ -44,6 +48,10 @@ interface SessionDao {
     /** G3 (#32): единственная сессия по id — для offline-чтения экрана деталей. */
     @Query("SELECT * FROM sessions WHERE id = :sessionId LIMIT 1")
     suspend fun getById(sessionId: String): SessionEntity?
+
+    /** #73: разовое чтение сессий ученика из кэша — для offline-профиля. */
+    @Query("SELECT * FROM sessions WHERE studentId = :studentId ORDER BY sessionNumber DESC")
+    suspend fun getByStudent(studentId: String): List<SessionEntity>
 
     @Upsert
     suspend fun upsertAll(sessions: List<SessionEntity>)

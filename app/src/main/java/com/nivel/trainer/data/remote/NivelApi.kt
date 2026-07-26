@@ -35,10 +35,6 @@ interface NivelApi {
     @GET("api/v1/students")
     suspend fun getStudents(): StudentsResponse
 
-    // TODO(#A3): подтвердить путь/шейп сессий ученика.
-    @GET("api/v1/students/{studentId}/sessions")
-    suspend fun getStudentSessions(@Path("studentId") studentId: String): List<SessionDto>
-
     /**
      * Инсайт-карточки сессии (`GET /api/v1/sessions/{id}/insight-cards`).
      * Обёртка `{ cards }`; карточки упорядочены по position (`getSessionInsightCardsCore`).

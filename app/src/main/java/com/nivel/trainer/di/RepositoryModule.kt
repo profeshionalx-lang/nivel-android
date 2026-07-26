@@ -1,16 +1,12 @@
 package com.nivel.trainer.di
 
-import com.nivel.trainer.data.repository.DefaultInsightCardRepository
 import com.nivel.trainer.data.repository.DefaultInsightsRepository
 import com.nivel.trainer.data.repository.DefaultSessionDetailRepository
-import com.nivel.trainer.data.repository.DefaultSessionRepository
 import com.nivel.trainer.data.repository.DefaultStudentProfileRepository
 import com.nivel.trainer.data.repository.DefaultStudentRepository
 import com.nivel.trainer.data.repository.DefaultTranscriptRepository
-import com.nivel.trainer.data.repository.InsightCardRepository
 import com.nivel.trainer.data.repository.InsightsRepository
 import com.nivel.trainer.data.repository.SessionDetailRepository
-import com.nivel.trainer.data.repository.SessionRepository
 import com.nivel.trainer.data.repository.StudentProfileRepository
 import com.nivel.trainer.data.repository.StudentRepository
 import com.nivel.trainer.data.repository.TranscriptRepository
@@ -31,14 +27,6 @@ abstract class RepositoryModule {
     @Binds
     @Singleton
     abstract fun bindStudentRepository(impl: DefaultStudentRepository): StudentRepository
-
-    @Binds
-    @Singleton
-    abstract fun bindSessionRepository(impl: DefaultSessionRepository): SessionRepository
-
-    @Binds
-    @Singleton
-    abstract fun bindInsightCardRepository(impl: DefaultInsightCardRepository): InsightCardRepository
 
     @Binds
     @Singleton

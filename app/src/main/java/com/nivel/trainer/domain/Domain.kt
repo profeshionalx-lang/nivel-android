@@ -259,3 +259,14 @@ data class OverviewSession(
     val sessionNumber: Int?,
     val date: String?,
 )
+
+/**
+ * Элемент библиотеки — навык или упражнение (E6, #77). Одна и та же форма для
+ * обеих категорий (сервер отдаёт одинаковый шейп на `/skills` и `/exercises`) —
+ * какая это категория, знает только вызывающий код (вкладка экрана).
+ */
+data class LibraryItem(
+    val id: Int,
+    val nameRu: String,
+    val nameEn: String?,
+)

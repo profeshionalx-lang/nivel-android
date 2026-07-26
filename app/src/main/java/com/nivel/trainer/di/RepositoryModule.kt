@@ -4,9 +4,11 @@ import com.nivel.trainer.data.repository.DefaultInsightsRepository
 import com.nivel.trainer.data.repository.DefaultSessionDetailRepository
 import com.nivel.trainer.data.repository.DefaultStudentProfileRepository
 import com.nivel.trainer.data.repository.DefaultStudentRepository
+import com.nivel.trainer.data.repository.DefaultLibraryRepository
 import com.nivel.trainer.data.repository.DefaultTranscriptRepository
 import com.nivel.trainer.data.repository.DefaultTrainerOverviewRepository
 import com.nivel.trainer.data.repository.InsightsRepository
+import com.nivel.trainer.data.repository.LibraryRepository
 import com.nivel.trainer.data.repository.SessionDetailRepository
 import com.nivel.trainer.data.repository.StudentProfileRepository
 import com.nivel.trainer.data.repository.StudentRepository
@@ -54,4 +56,9 @@ abstract class RepositoryModule {
     abstract fun bindTrainerOverviewRepository(
         impl: DefaultTrainerOverviewRepository,
     ): TrainerOverviewRepository
+
+    // E6 (#77) — библиотека навыков и упражнений.
+    @Binds
+    @Singleton
+    abstract fun bindLibraryRepository(impl: DefaultLibraryRepository): LibraryRepository
 }

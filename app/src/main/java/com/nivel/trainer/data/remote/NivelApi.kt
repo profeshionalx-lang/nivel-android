@@ -259,4 +259,27 @@ interface NivelApi {
      */
     @GET("api/v1/trainer/overview")
     suspend fun getTrainerOverview(): TrainerOverviewResponse
+
+    // ---------------------------------------------------------------------------
+    // E6 (#77) — библиотека навыков и упражнений (NIVEL#225).
+    // ---------------------------------------------------------------------------
+
+    /**
+     * Поиск навыков (`GET /api/v1/skills?q=`). Пустой `q` → первые 50 по алфавиту,
+     * непустой → matches по `name_ru`/`name_en`. Trainer-only.
+     */
+    @GET("api/v1/skills")
+    suspend fun searchSkills(@Query("q") query: String? = null): SkillsResponse
+
+    /** Создать навык (`POST /api/v1/skills`, 201). Дубликат имени — id существующей записи. */
+    @POST("api/v1/skills")
+    suspend fun createSkill(@Body body: CreateLibraryItemRequest): CreateLibraryItemResponse
+
+    /** Поиск упражнений (`GET /api/v1/exercises?q=`) — тот же контракт, что у навыков. */
+    @GET("api/v1/exercises")
+    suspend fun searchExercises(@Query("q") query: String? = null): ExercisesResponse
+
+    /** Создать упражнение (`POST /api/v1/exercises`, 201). */
+    @POST("api/v1/exercises")
+    suspend fun createExercise(@Body body: CreateLibraryItemRequest): CreateLibraryItemResponse
 }

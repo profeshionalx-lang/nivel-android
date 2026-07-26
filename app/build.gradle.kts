@@ -1,4 +1,5 @@
 import java.io.FileInputStream
+import java.net.URI
 import java.util.Properties
 
 plugins {
@@ -57,7 +58,12 @@ android {
         // Базовый URL веб-Nivel (тот же хост, что API) — для построения внешних
         // ссылок (например, claim-инвайтов). Вход Гречки теперь возвращается на
         // custom-scheme deep link nivel://auth/callback, а не на этот хост.
-        buildConfigField("String", "NIVEL_URL", "\"https://nivel-five.vercel.app\"")
+        val nivelUrl = "https://nivel-five.vercel.app"
+        buildConfigField("String", "NIVEL_URL", "\"$nivelUrl\"")
+        // Хост веб-Nivel для App Links (#81, ссылки-приглашения `/invite/{token}`).
+        // Манифест не читает BuildConfig напрямую — прокидываем тем же значением
+        // через manifestPlaceholders, чтобы dev/prod не разъезжались.
+        manifestPlaceholders["nivelHost"] = URI(nivelUrl).host
         // База падел-платформы Гречка: открываем `${GRECHKA_URL}/auth-nivel.html`
         // в Chrome Custom Tabs (см. GrechkaCustomTab.launchGrechkaAuth).
         buildConfigField("String", "GRECHKA_URL", "\"https://www.grecha.one\"")

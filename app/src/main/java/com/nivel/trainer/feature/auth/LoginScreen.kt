@@ -54,6 +54,10 @@ private val GoogleButtonText = Color(0xFF111827)       // text-gray-900
  *
  * @param onLoggedIn вызывается после успешного сохранения bearer-токена.
  * @param claimToken опциональный токен приглашения (claim-флоу) из deep link.
+ * @param onClaimTokenConsumed вызывается сразу после применения [claimToken] к
+ *   [viewModel] (#81) — MainActivity должен сбросить его в null, иначе тот же
+ *   токен переживёт логаут и подмешается в следующий, никак не связанный вход
+ *   (новый `AuthViewModel` создаётся заново при каждом заходе на LOGIN).
  * @param authCallbackUri deep link `nivel://auth/callback?...` из Custom Tabs,
  *   проброшенный из MainActivity; обрабатывается один раз.
  * @param onAuthCallbackConsumed вызывается после обработки [authCallbackUri],
@@ -64,6 +68,7 @@ fun LoginScreen(
     onLoggedIn: () -> Unit,
     modifier: Modifier = Modifier,
     claimToken: String? = null,
+    onClaimTokenConsumed: () -> Unit = {},
     authCallbackUri: android.net.Uri? = null,
     onAuthCallbackConsumed: () -> Unit = {},
     viewModel: AuthViewModel = hiltViewModel(),
@@ -71,7 +76,12 @@ fun LoginScreen(
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
 
-    LaunchedEffect(claimToken) { viewModel.setClaimToken(claimToken) }
+    LaunchedEffect(claimToken) {
+        if (claimToken != null) {
+            viewModel.setClaimToken(claimToken)
+            onClaimTokenConsumed()
+        }
+    }
     LaunchedEffect(state.loggedIn) { if (state.loggedIn) onLoggedIn() }
 
     // Одноразовый запрос на открытие Custom Tabs.

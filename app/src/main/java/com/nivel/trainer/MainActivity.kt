@@ -7,6 +7,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.util.Log
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -25,6 +26,7 @@ import androidx.lifecycle.lifecycleScope
 import androidx.navigation.compose.rememberNavController
 import com.google.firebase.messaging.FirebaseMessaging
 import com.nivel.trainer.data.remote.AuthEvents
+import com.nivel.trainer.data.repository.AuthRepository
 import com.nivel.trainer.feature.NivelNavHost
 import com.nivel.trainer.feature.NivelRoutes
 import com.nivel.trainer.push.PushTokenRegistrar
@@ -49,11 +51,28 @@ class MainActivity : ComponentActivity() {
     /** #72 — событие 401 от любого авторизованного клиента (см. `AuthEvents`). */
     @Inject lateinit var authEvents: AuthEvents
 
+    /** #81 — проверка «уже залогинен?» перед тем, как принять claim-ссылку приглашения. */
+    @Inject lateinit var authRepository: AuthRepository
+
     /** Deep link возврата входа Гречки; потребляется LoginScreen и сбрасывается в null. */
     private val authCallbackUri: MutableState<Uri?> = mutableStateOf(null)
 
     /** Deep link открытия экрана из тапа по push (напр. `nivel://session/{id}`). */
     private val pushDeepLink: MutableState<Uri?> = mutableStateOf(null)
+
+    /**
+     * Claim-токен из App Link приглашения (`https://…/invite/{token}`, #81) —
+     * проброшен в [com.nivel.trainer.feature.auth.LoginScreen]. Устанавливается
+     * только если пользователь ещё НЕ залогинен (см. [handleInviteLink]) — иначе
+     * ссылку молча проглотили бы, ничего не изменив на экране логина.
+     *
+     * Обнуляется, как только `LoginScreen` применил его к своему `AuthViewModel`
+     * (см. `onClaimTokenConsumed` в [NivelRoot]/`NivelNavHost`). Без этого один и
+     * тот же токен пережил бы логаут: `AuthViewModel` пересоздаётся при каждом
+     * новом заходе на LOGIN (`popUpTo(0)`), и стухший/уже использованный claim
+     * молча подмешался бы в совершенно не связанный повторный вход.
+     */
+    private val inviteClaimToken: MutableState<String?> = mutableStateOf(null)
 
     /**
      * #72 — счётчик 401-событий. 0 = ещё не было ни одного (начальное значение, не
@@ -89,6 +108,8 @@ class MainActivity : ComponentActivity() {
                 pushDeepLink = pushDeepLink.value,
                 onPushDeepLinkConsumed = { pushDeepLink.value = null },
                 logoutSignal = logoutSignal.value,
+                inviteClaimToken = inviteClaimToken.value,
+                onInviteClaimTokenConsumed = { inviteClaimToken.value = null },
             )
         }
     }
@@ -102,11 +123,42 @@ class MainActivity : ComponentActivity() {
 
     private fun captureIntent(intent: Intent?) {
         val uri = intent?.data ?: return
-        if (uri.scheme != "nivel") return
-        when (uri.host) {
-            "auth" -> authCallbackUri.value = uri
-            // Любой другой nivel://<host>/... — навигационный deep link из push.
-            else -> pushDeepLink.value = uri
+        when (uri.scheme) {
+            "nivel" -> when (uri.host) {
+                "auth" -> authCallbackUri.value = uri
+                // Любой другой nivel://<host>/... — навигационный deep link из push.
+                else -> pushDeepLink.value = uri
+            }
+            // #81: App Link `https://…/invite/{token}` — единственный https-путь,
+            // на который манифест объявляет intent-filter, так что любой https-intent,
+            // дошедший сюда, по построению — приглашение.
+            "https" -> handleInviteLink(uri)
+        }
+    }
+
+    /**
+     * Claim-ссылка приглашения ученика (#81). Токен без проверки на сервере не
+     * бывает — просто прокидываем на экран логина, где реальную валидность (истёк /
+     * уже использован / мусор) вернёт `POST /api/v1/auth/token` при попытке claim'а
+     * (см. `AuthViewModel.mapError`). Здесь отсекаем только заведомо пустой токен и
+     * случай «уже залогинены» — тут ссылку нельзя молча проглотить (acceptance).
+     */
+    private fun handleInviteLink(uri: Uri) {
+        val token = uri.pathSegments.getOrNull(1)?.takeIf { it.isNotBlank() }
+        if (token == null) {
+            Toast.makeText(this, "Ссылка-приглашение недействительна.", Toast.LENGTH_LONG).show()
+            return
+        }
+        lifecycleScope.launch {
+            if (authRepository.hasToken()) {
+                Toast.makeText(
+                    this@MainActivity,
+                    "Вы уже авторизованы. Чтобы принять приглашение на другой аккаунт, сначала выйдите.",
+                    Toast.LENGTH_LONG,
+                ).show()
+            } else {
+                inviteClaimToken.value = token
+            }
         }
     }
 
@@ -151,6 +203,8 @@ private fun NivelRoot(
     pushDeepLink: Uri?,
     onPushDeepLinkConsumed: () -> Unit,
     logoutSignal: Int = 0,
+    inviteClaimToken: String? = null,
+    onInviteClaimTokenConsumed: () -> Unit = {},
 ) {
     NivelTheme {
         val navController = rememberNavController()
@@ -176,6 +230,8 @@ private fun NivelRoot(
                 onAuthCallbackConsumed = onAuthCallbackConsumed,
                 pushDeepLink = pushDeepLink,
                 onPushDeepLinkConsumed = onPushDeepLinkConsumed,
+                inviteClaimToken = inviteClaimToken,
+                onInviteClaimTokenConsumed = onInviteClaimTokenConsumed,
                 modifier = Modifier.padding(innerPadding)
             )
         }

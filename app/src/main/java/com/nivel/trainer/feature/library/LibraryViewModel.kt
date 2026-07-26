@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.nivel.trainer.data.repository.LibraryRepository
 import com.nivel.trainer.domain.LibraryItem
+import com.nivel.trainer.ui.state.isNetworkError
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -129,8 +130,8 @@ class LibraryViewModel @Inject constructor(
                 .onSuccess { item ->
                     _uiState.update { state ->
                         val updated = when (tab) {
-                            LibraryTab.SKILLS -> state.copy(skills = listOf(item) + state.skills)
-                            LibraryTab.EXERCISES -> state.copy(exercises = listOf(item) + state.exercises)
+                            LibraryTab.SKILLS -> state.copy(skills = prepend(item, state.skills))
+                            LibraryTab.EXERCISES -> state.copy(exercises = prepend(item, state.exercises))
                         }
                         updated.copy(createSheet = CreateLibraryItemState.Closed)
                     }
@@ -153,8 +154,20 @@ class LibraryViewModel @Inject constructor(
         }
     }
 
-    private fun mapError(e: Throwable): String =
-        e.message?.takeIf { it.isNotBlank() } ?: "Что-то пошло не так. Попробуйте снова."
+    /**
+     * Кладёт созданный элемент в начало списка. Сервер на дубликат имени отдаёт id
+     * УЖЕ существующей записи (не ошибку) — если она уже видна в текущей выдаче,
+     * простой `listOf(item) + list` дал бы два элемента с одинаковым `id` и уронил
+     * `LazyColumn` (`key = { it.id }` требует уникальности). Дубликат просто
+     * поднимаем наверх вместо повторной вставки.
+     */
+    private fun prepend(item: LibraryItem, list: List<LibraryItem>): List<LibraryItem> =
+        listOf(item) + list.filterNot { it.id == item.id }
+
+    private fun mapError(e: Throwable): String = when {
+        isNetworkError(e) -> "Нет подключения к интернету. Проверьте сеть и повторите."
+        else -> e.message?.takeIf { it.isNotBlank() } ?: "Что-то пошло не так. Попробуйте снова."
+    }
 
     private companion object {
         const val SEARCH_DEBOUNCE_MS = 300L

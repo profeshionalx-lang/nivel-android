@@ -12,6 +12,7 @@ import com.nivel.trainer.service.upload.UploadStage
 import com.nivel.trainer.service.upload.UploadStatusObserver
 import com.nivel.trainer.ui.state.isNetworkError
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -125,49 +126,56 @@ class SessionDetailViewModel @Inject constructor(
         uploadScheduler.retry(id, filePath)
     }
 
+    /** Текущий явный (пользовательский) запрос обзора — см. [refresh]. */
+    private var refreshJob: Job? = null
+
     /**
      * Тянет состояние сессии с сервера. Если обзор уже на экране — рефреш идёт незаметно
      * ([SessionDetailUiState.refreshing]); иначе — полноэкранный спиннер ([loading]).
      * Ошибку первичной загрузки показываем с «Повторить»; ошибку фонового рефреша — молча.
      * Источник вызова — пользователь (pull-to-refresh, возврат на экран, кнопка «Повторить»).
+     *
+     * Отменяет предыдущий незавершённый [refresh] — иначе более старый ответ, доехавший позже
+     * нового, мог бы погасить индикатор раньше времени или затереть свежие данные устаревшими.
      */
     fun refresh() {
         val id = sessionId ?: return
+        refreshJob?.cancel()
         val hasData = _uiState.value.overview != null
         _uiState.update { it.copy(loading = !hasData, refreshing = hasData, error = null) }
-        viewModelScope.launch { fetchOverview(id) }
+        refreshJob = viewModelScope.launch { fetchOverview(id, updateSpinners = true) }
     }
 
     /**
      * #71: тихий автополлинг (заливка/анализ, см. [SessionDetailScreen]) — обновляет данные
-     * без [SessionDetailUiState.loading]/[refreshing], иначе pull-to-refresh индикатор мигал бы
-     * каждые несколько секунд, пока идёт заливка или анализ.
+     * без [SessionDetailUiState.loading]/[refreshing]. Не трогает индикаторы даже по завершении —
+     * иначе поллинг мог бы погасить спиннер параллельно идущего пользовательского [refresh],
+     * а pull-to-refresh индикатор мигал бы каждые несколько секунд, пока идёт заливка или анализ.
      */
     fun pollRefresh() {
         val id = sessionId ?: return
-        viewModelScope.launch { fetchOverview(id) }
+        viewModelScope.launch { fetchOverview(id, updateSpinners = false) }
     }
 
-    private suspend fun fetchOverview(id: String) {
+    private suspend fun fetchOverview(id: String, updateSpinners: Boolean) {
         repository.getOverview(id)
             .onSuccess { overview ->
                 // Если сервер уже довёл анализ до ready — снимаем прежнюю ошибку генерации.
                 val clearGenError = overview.audio?.analysisStatus == "ready"
-                _uiState.update {
-                    it.copy(
-                        loading = false,
-                        refreshing = false,
+                _uiState.update { state ->
+                    state.copy(
+                        loading = if (updateSpinners) false else state.loading,
+                        refreshing = if (updateSpinners) false else state.refreshing,
                         overview = overview,
-                        error = null,
-                        generateError = if (clearGenError) null else it.generateError,
+                        error = if (updateSpinners) null else state.error,
+                        generateError = if (clearGenError) null else state.generateError,
                         isOffline = overview.isStale, // G3: флаг кэша
                     )
                 }
             }
             .onFailure { e ->
+                if (!updateSpinners) return@onFailure // тихий автополлинг: не трогаем видимое состояние
                 _uiState.update { state ->
-                    // Тихий автополлинг (уже был overview): не подменяем видимую ошибку,
-                    // просто гасим индикаторы, если они были включены явным refresh().
                     state.copy(
                         loading = false,
                         refreshing = false,

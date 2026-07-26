@@ -39,6 +39,7 @@ import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -93,6 +94,13 @@ fun StudentsListScreen(
     modifier: Modifier = Modifier,
     viewModel: StudentsViewModel = hiltViewModel(),
 ) {
+    // #71: в отличие от остальных экранов, у StudentsViewModel нет load(id) с LaunchedEffect —
+    // единственная точка входа была init{}. LaunchedEffect(Unit) гарантированно перезапрашивает
+    // список при каждом новом входе в composition (в т.ч. возврат из профиля ученика по back);
+    // RefreshOnResume отдельно ловит ON_RESUME без пересоздания composable (свернули/развернули
+    // приложение, не покидая экран) — Navigation Compose при возврате на экран сам пересоздаёт
+    // composable, так что там оба триггера отрабатывают на разные случаи, не дублируя друг друга.
+    LaunchedEffect(Unit) { viewModel.refresh() }
     RefreshOnResume(onRefresh = viewModel::refresh)
     val state by viewModel.uiState.collectAsStateWithLifecycle()
 
@@ -188,18 +196,19 @@ private fun StudentsListContent(
             )
         }
 
-        // #71: pull-to-refresh — переиспользует state.refreshing (тот же индикатор, что и
-        // первичная загрузка при пустом кэше).
+        // #71: pull-to-refresh поверх непустого списка. При пустом кэше рефреш уже показан
+        // центрированным спиннером ниже — не дублируем его индикатором пул-ту-рефреша.
         val pullState = rememberPullToRefreshState()
+        val showPullIndicator = refreshing && students.isNotEmpty()
         PullToRefreshBox(
-            isRefreshing = refreshing,
+            isRefreshing = showPullIndicator,
             onRefresh = onRetry,
             modifier = Modifier.fillMaxSize(),
             state = pullState,
             indicator = {
                 PullToRefreshDefaults.Indicator(
                     modifier = Modifier.align(Alignment.TopCenter),
-                    isRefreshing = refreshing,
+                    isRefreshing = showPullIndicator,
                     state = pullState,
                     containerColor = SurfaceCard,
                     color = Primary,

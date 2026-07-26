@@ -98,7 +98,10 @@ class DefaultSessionDetailRepository @Inject constructor(
         // но overview содержит уже domain-объект; дешевле повторить чем везде таскать DTO).
         runCatching {
             val detailDto = api.getSessionDetail(sessionId)
-            sessionDao.upsert(detailDto.toEntity())
+            // #73: сессия могла быть уже закэширована профилем ученика с реальным
+            // studentId — не затираем его пустой строкой при повторном upsert.
+            val existingStudentId = sessionDao.getById(sessionId)?.studentId ?: ""
+            sessionDao.upsert(detailDto.toEntity(existingStudentId))
         }
         // Кэшируем карточки.
         if (overview.cards.isNotEmpty()) {

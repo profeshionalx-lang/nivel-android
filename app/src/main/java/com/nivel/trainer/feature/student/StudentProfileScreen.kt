@@ -134,6 +134,7 @@ fun StudentProfileScreen(
         loading = state.loading,
         error = state.error,
         refreshing = state.refreshing,
+        isOffline = state.isOffline,
         profile = state.profile,
         editing = state.editing,
         inviteBusy = state.inviteBusy,
@@ -203,6 +204,7 @@ private fun StudentProfileContent(
     loading: Boolean,
     error: String?,
     refreshing: Boolean,
+    isOffline: Boolean,
     profile: StudentProfile?,
     goalCreator: GoalCreatorState,
     masterPlanState: MasterPlanEditorState,
@@ -236,6 +238,11 @@ private fun StudentProfileContent(
             .background(Background),
     ) {
         Header(onBack = onBack)
+
+        // #73: баннер «оффлайн» — показываем когда профиль из Room-кэша (нет сети).
+        if (isOffline) {
+            com.nivel.trainer.ui.state.OfflineBanner(onRetry = onRetry)
+        }
 
         // #71: pull-to-refresh — рефреш поверх уже загруженного профиля, без спиннера.
         val pullState = rememberPullToRefreshState()
@@ -1872,6 +1879,7 @@ private fun StudentProfilePreview() {
             loading = false,
             error = null,
             refreshing = false,
+            isOffline = false,
             profile = previewProfile,
             goalCreator = GoalCreatorState(),
             masterPlanState = MasterPlanEditorState(),
@@ -1898,6 +1906,7 @@ private fun StudentProfileEmptyPreview() {
             loading = false,
             error = null,
             refreshing = false,
+            isOffline = false,
             profile = previewProfile.copy(goals = emptyList(), sessions = emptyList(), masterPlan = null),
             goalCreator = GoalCreatorState(),
             masterPlanState = MasterPlanEditorState(),

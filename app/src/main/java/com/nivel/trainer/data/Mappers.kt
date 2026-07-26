@@ -9,7 +9,6 @@ import com.nivel.trainer.data.remote.MasterPlanItemDto
 import com.nivel.trainer.data.remote.MasterPlanSectionDto
 import com.nivel.trainer.data.remote.ProblemDto
 import com.nivel.trainer.data.remote.SessionDetailResponse
-import com.nivel.trainer.data.remote.SessionDto
 import com.nivel.trainer.data.remote.SessionInsightCardDto
 import com.nivel.trainer.data.remote.SessionTranscriptStatusResponse
 import com.nivel.trainer.data.remote.ShadowStudentResponse
@@ -78,21 +77,6 @@ fun ShadowStudentResponse.toDomain() = ShadowStudent(
 
 // --- Sessions ---
 
-/** studentId приходит из пути запроса (DTO его не содержит). */
-fun SessionDto.toEntity(studentId: String) = SessionEntity(
-    id = id,
-    studentId = studentId,
-    goalId = goalId,
-    sessionNumber = sessionNumber,
-    trainerNotes = trainerNotes,
-    studentInsight = studentInsight,
-    status = status,
-    trainerReviewCompleted = trainerReviewCompleted,
-    scheduledAt = scheduledAt,
-    completedAt = completedAt,
-    createdAt = createdAt,
-)
-
 fun SessionEntity.toDomain() = TrainingSession(
     id = id,
     studentId = studentId,
@@ -147,6 +131,36 @@ fun ProblemDto.toDomain() = Problem(
 )
 
 fun StudentSessionDto.toDomain() = StudentSession(
+    id = id,
+    goalId = goalId,
+    sessionNumber = sessionNumber,
+    status = status,
+    scheduledAt = scheduledAt,
+    completedAt = completedAt,
+    createdAt = createdAt,
+)
+
+/**
+ * G3/#73: кэширует сессию из профиля ученика (`GET /students/{id}`) в Room —
+ * тот же `sessions`, что и экран карточки тренировки. `sessionNumber` нет в базе
+ * как nullable (см. [SessionEntity]), поэтому фолбэк 0, как в [SessionDetailResponse.toEntity].
+ */
+fun StudentSessionDto.toEntity(studentId: String) = SessionEntity(
+    id = id,
+    studentId = studentId,
+    goalId = goalId,
+    sessionNumber = sessionNumber ?: 0,
+    trainerNotes = null,
+    studentInsight = null,
+    status = status,
+    trainerReviewCompleted = false,
+    scheduledAt = scheduledAt,
+    completedAt = completedAt,
+    createdAt = createdAt,
+)
+
+/** Обратный маппер для offline-чтения профиля из кэша (#73). */
+fun SessionEntity.toStudentSession() = StudentSession(
     id = id,
     goalId = goalId,
     sessionNumber = sessionNumber,
@@ -243,11 +257,12 @@ fun SessionDetailResponse.toDomain() = SessionDetail(
 
 /**
  * G3 (#32): кэширует детали сессии из API в Room-entity.
- * studentId — пустая строка (detail-эндпоинт его не возвращает; кэш читается по session id).
+ * detail-эндпоинт не возвращает studentId — вызывающий код (#73) передаёт то, что
+ * уже было в кэше (из профиля ученика), либо "" если сессию раньше не кэшировали.
  */
-fun SessionDetailResponse.toEntity() = SessionEntity(
+fun SessionDetailResponse.toEntity(studentId: String = "") = SessionEntity(
     id = id,
-    studentId = "",
+    studentId = studentId,
     goalId = goalId,
     sessionNumber = sessionNumber ?: 0,
     trainerNotes = trainerNotes,

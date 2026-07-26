@@ -50,6 +50,8 @@ data class StudentProfileUiState(
     val error: String? = null,
     /** #71: рефреш поверх уже загруженного профиля (pull-to-refresh/возврат на экран). */
     val refreshing: Boolean = false,
+    /** #73: профиль отдан из офлайн-кэша (нет сети) — показываем баннер. */
+    val isOffline: Boolean = false,
     /** E3 — инлайн-правка профиля; null = режим просмотра. */
     val editing: ProfileEditState? = null,
     /** E3 — идёт действие с приглашением (перевыпуск/отзыв). */
@@ -141,7 +143,15 @@ class StudentProfileViewModel @Inject constructor(
         viewModelScope.launch {
             repository.getProfile(id)
                 .onSuccess { profile ->
-                    _uiState.update { it.copy(loading = false, refreshing = false, profile = profile, error = null) }
+                    _uiState.update {
+                        it.copy(
+                            loading = false,
+                            refreshing = false,
+                            profile = profile,
+                            error = null,
+                            isOffline = profile.isStale,
+                        )
+                    }
                 }
                 .onFailure { e ->
                     _uiState.update { state ->

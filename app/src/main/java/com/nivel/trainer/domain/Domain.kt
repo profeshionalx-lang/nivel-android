@@ -111,6 +111,12 @@ data class StudentProfile(
     val masterPlan: MasterPlan?,
     /** Приглашение ученика (E3); null — статус ещё не загружен. */
     val invite: StudentInvite? = null,
+    /**
+     * #73: true, если профиль отдан из Room-кэша (нет сети/сбой сервера) —
+     * тогда цели/мастер-план/приглашение недоступны офлайн (best-effort, как
+     * [SessionOverview.isStale] для аудио-статуса), а сессии — из кэша.
+     */
+    val isStale: Boolean = false,
 )
 
 /** Мастер-план ученика: упорядоченные секции с пунктами. */

@@ -5,6 +5,7 @@ import com.google.firebase.messaging.FirebaseMessaging
 import com.nivel.trainer.data.local.TokenStore
 import com.nivel.trainer.data.remote.DeviceTokenRequest
 import com.nivel.trainer.data.remote.NivelApi
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.suspendCancellableCoroutine
 import javax.inject.Inject
@@ -40,6 +41,8 @@ class PushTokenRegistrar @Inject constructor(
     suspend fun register(fcmToken: String) {
         try {
             registerIfSessionPresent(fcmToken)
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             // Сеть/401 — не критично, повторится при следующем onNewToken/старте.
             Log.w(TAG, "failed to register device token", e)
@@ -87,6 +90,8 @@ class PushTokenRegistrar @Inject constructor(
                     .addOnFailureListener { cont.resumeWithException(it) }
             }
             Log.d(TAG, "local FCM token forgotten")
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             Log.w(TAG, "failed to forget local FCM token", e)
         }

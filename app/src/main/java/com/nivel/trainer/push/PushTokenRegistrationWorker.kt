@@ -32,6 +32,8 @@ class PushTokenRegistrationWorker @AssistedInject constructor(
     }
 
     companion object {
+        // runAttemptCount стартует с 0, поэтому итог — MAX_ATTEMPTS + 1 попыток
+        // всего (как в AudioUploadWorker).
         private const val MAX_ATTEMPTS = 5
     }
 }

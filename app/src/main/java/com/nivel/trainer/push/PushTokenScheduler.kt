@@ -23,7 +23,16 @@ class PushTokenScheduler @Inject constructor(
     @ApplicationContext private val context: Context,
 ) {
 
-    /** Вызывается сразу после успешного логина (см. `AuthRepository.loginWithFirebaseIdToken`). */
+    /**
+     * Вызывается сразу после успешного логина (см. `AuthRepository.loginWithFirebaseIdToken`).
+     *
+     * [ExistingWorkPolicy.REPLACE], а не `KEEP` (в отличие от `AudioUploadScheduler`,
+     * который защищает уже стартовавшую заливку файла от дублей): воркер здесь читает
+     * *текущую* сессию из [TokenStore] в момент выполнения, а не данные, зафиксированные
+     * при постановке в очередь. Если старая незавершённая попытка регистрации ещё висит
+     * в очереди от предыдущего логина, свежий вызов должен её заменить, а не ждать своей
+     * очереди позади уже устаревшей.
+     */
     fun enqueueAfterLogin() {
         val request = OneTimeWorkRequestBuilder<PushTokenRegistrationWorker>()
             .setConstraints(

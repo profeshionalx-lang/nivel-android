@@ -35,10 +35,28 @@ data class TranscriptUiState(
      * от [error] (сетевой/серверный сбой).
      */
     val notFound: Boolean = false,
-)
+    /**
+     * A9 (#79): статус анализа отдельно от статуса транскрипции — свои текст и
+     * ошибка, не смешиваются с [transcript]/[error]. `null`, пока не загружен или
+     * транскрипта ещё нет (для 404 запрашивать нечего).
+     */
+    val analysisStatus: String? = null,
+    val analysisError: String? = null,
+    /** Меню действий (bottom-sheet): сброс/удаление/повторный анализ. */
+    val actionsSheetOpen: Boolean = false,
+    /** Подтверждение удаления (отдельный bottom-sheet — деструктивное действие). */
+    val confirmDelete: Boolean = false,
+    val actionInProgress: Boolean = false,
+    val actionError: String? = null,
+    /** «Анализ поставлен в очередь» — снимается пользователем в UI. */
+    val queuedMessage: String? = null,
+) {
+    /** «Проанализировать заново» доступно только когда расшифровка готова (сервер иначе вернёт 400). */
+    val canRequeueAnalysis: Boolean get() = transcript?.status == TranscriptStatus.READY
+}
 
 /**
- * ViewModel экрана транскрипта (D1, #19). Паттерн как у
+ * ViewModel экрана транскрипта (D1, #19; управление — A9, #79). Паттерн как у
  * [com.nivel.trainer.feature.student.StudentProfileViewModel]: Hilt-инъекция
  * репозитория, единый [StateFlow], загрузка через корутину, без Room-кэша.
  *
@@ -100,6 +118,7 @@ class TranscriptViewModel @Inject constructor(
                 _uiState.update {
                     it.copy(loading = false, refreshing = false, transcript = transcript, error = null, notFound = false)
                 }
+                loadStatus(id)
             }
             .onFailure { e ->
                 _uiState.update { state ->
@@ -109,13 +128,28 @@ class TranscriptViewModel @Inject constructor(
                         // ПЕРЕД "есть данные" — иначе poll на processing-экране после
                         // удаления записи навсегда завис бы на старом снимке.
                         e is HttpException && e.code() == 404 ->
-                            state.copy(loading = false, refreshing = false, transcript = null, error = null, notFound = true)
+                            state.copy(
+                                loading = false, refreshing = false, transcript = null, error = null,
+                                notFound = true, analysisStatus = null, analysisError = null,
+                            )
                         // Данные есть, фоновый сбой (сеть/сервер) при опросе/рефреше — оставляем последний снимок.
                         state.transcript != null -> state.copy(loading = false, refreshing = false)
                         else ->
                             state.copy(loading = false, refreshing = false, error = mapError(e), notFound = false)
                     }
                 }
+            }
+    }
+
+    /**
+     * Статус анализа (A9, #79) — отдельным запросом, best-effort: сбой не должен
+     * ронять уже показанный транскрипт, поэтому ошибка молча игнорируется (при
+     * следующем refresh/poll подтянется).
+     */
+    private suspend fun loadStatus(id: String) {
+        repository.getStatus(id)
+            .onSuccess { status ->
+                _uiState.update { it.copy(analysisStatus = status.analysisStatus, analysisError = status.analysisError) }
             }
     }
 
@@ -138,6 +172,99 @@ class TranscriptViewModel @Inject constructor(
         isNetworkError(e) -> "Нет подключения к интернету. Проверьте сеть и повторите."
         e is HttpException && e.code() == 403 -> "Нет доступа к этой сессии."
         else -> e.message?.takeIf { it.isNotBlank() } ?: "Что-то пошло не так. Попробуйте снова."
+    }
+
+    // --- A9 (#79): меню действий — сброс, удаление, повторный анализ ---
+
+    fun openActionsSheet() = _uiState.update { it.copy(actionsSheetOpen = true, actionError = null) }
+
+    fun closeActionsSheet() = _uiState.update { it.copy(actionsSheetOpen = false) }
+
+    fun requestDelete() = _uiState.update { it.copy(actionsSheetOpen = false, confirmDelete = true) }
+
+    fun cancelDelete() {
+        if (_uiState.value.actionInProgress) return
+        _uiState.update { it.copy(confirmDelete = false) }
+    }
+
+    fun dismissQueuedMessage() = _uiState.update { it.copy(queuedMessage = null) }
+
+    /**
+     * «Расшифровать заново»: сбрасывает упавшую/зависшую расшифровку (удаляет строку
+     * и файл в Storage — тот же `deleteTranscriptCore`, что и удаление). Реального
+     * автозапуска новой расшифровки нет — тренеру нужно заново загрузить аудио на
+     * экране сессии; здесь экран просто возвращается в пустое состояние «запись ещё
+     * не расшифрована», готовое принять новую попытку.
+     */
+    fun resetTranscript() {
+        val id = sessionId ?: return
+        if (_uiState.value.actionInProgress) return
+        loadJob?.cancel()
+        _uiState.update { it.copy(actionsSheetOpen = false, actionInProgress = true, actionError = null) }
+        viewModelScope.launch {
+            repository.resetTranscript(id)
+                .onSuccess {
+                    _uiState.update {
+                        it.copy(
+                            actionInProgress = false, transcript = null, notFound = true,
+                            analysisStatus = null, analysisError = null,
+                        )
+                    }
+                }
+                .onFailure { e -> _uiState.update { it.copy(actionInProgress = false, actionError = mapError(e)) } }
+        }
+    }
+
+    /** «Удалить запись», подтверждено в bottom-sheet: удаляет строку + аудио-файл. */
+    fun confirmDelete() {
+        val id = sessionId ?: return
+        if (_uiState.value.actionInProgress) return
+        loadJob?.cancel()
+        _uiState.update { it.copy(actionInProgress = true, actionError = null) }
+        viewModelScope.launch {
+            repository.deleteTranscript(id)
+                .onSuccess {
+                    _uiState.update {
+                        it.copy(
+                            actionInProgress = false, confirmDelete = false, transcript = null, notFound = true,
+                            analysisStatus = null, analysisError = null,
+                        )
+                    }
+                }
+                .onFailure { e -> _uiState.update { it.copy(actionInProgress = false, actionError = mapError(e)) } }
+        }
+    }
+
+    /**
+     * «Проанализировать заново» — только когда транскрипт `ready` ([TranscriptUiState.canRequeueAnalysis]).
+     * Не мгновенно: демон подхватывает запись сам, поэтому UI лишь подтверждает
+     * постановку в очередь, статус обновится по `RefreshOnResume`/pull-to-refresh.
+     */
+    fun requeueAnalysis() {
+        val id = sessionId ?: return
+        if (_uiState.value.actionInProgress || !_uiState.value.canRequeueAnalysis) return
+        _uiState.update { it.copy(actionsSheetOpen = false, actionInProgress = true, actionError = null) }
+        viewModelScope.launch {
+            repository.requeueAnalysis(id)
+                .onSuccess {
+                    _uiState.update {
+                        it.copy(
+                            actionInProgress = false,
+                            queuedMessage = "Анализ поставлен в очередь",
+                            analysisStatus = "idle",
+                            analysisError = null,
+                        )
+                    }
+                }
+                .onFailure { e ->
+                    val message = if (e is HttpException && e.code() == 400) {
+                        "Анализ уже в очереди или транскрипт не готов."
+                    } else {
+                        mapError(e)
+                    }
+                    _uiState.update { it.copy(actionInProgress = false, actionError = message) }
+                }
+        }
     }
 
     private companion object {

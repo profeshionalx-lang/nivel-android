@@ -2,6 +2,7 @@ package com.nivel.trainer.data.repository
 
 import com.nivel.trainer.data.remote.NivelApi
 import com.nivel.trainer.data.toDomain
+import com.nivel.trainer.domain.SessionAudioStatus
 import com.nivel.trainer.domain.Transcript
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -15,6 +16,18 @@ import javax.inject.Singleton
  */
 interface TranscriptRepository {
     suspend fun getTranscript(sessionId: String): Result<Transcript>
+
+    /** Статус транскрипции + анализа (A9, #79) — отдельно от текста, для меню действий. */
+    suspend fun getStatus(sessionId: String): Result<SessionAudioStatus>
+
+    /** Сброс транскрипта (A9, #79): удаляет строку + файл, тренер грузит аудио заново. */
+    suspend fun resetTranscript(sessionId: String): Result<Unit>
+
+    /** Удаление транскрипта (A9, #79): деструктивно, подтверждается в UI до вызова. */
+    suspend fun deleteTranscript(sessionId: String): Result<Unit>
+
+    /** Повторная постановка анализа в очередь (A9, #79) — доступно только на `ready`. */
+    suspend fun requeueAnalysis(sessionId: String): Result<Unit>
 }
 
 @Singleton
@@ -24,5 +37,24 @@ class DefaultTranscriptRepository @Inject constructor(
 
     override suspend fun getTranscript(sessionId: String): Result<Transcript> = runCatching {
         api.getTranscript(sessionId).toDomain()
+    }
+
+    override suspend fun getStatus(sessionId: String): Result<SessionAudioStatus> = runCatching {
+        api.getSessionTranscriptStatus(sessionId).toDomain()
+    }
+
+    override suspend fun resetTranscript(sessionId: String): Result<Unit> = runCatching {
+        api.resetTranscript(sessionId)
+        Unit
+    }
+
+    override suspend fun deleteTranscript(sessionId: String): Result<Unit> = runCatching {
+        api.deleteTranscript(sessionId)
+        Unit
+    }
+
+    override suspend fun requeueAnalysis(sessionId: String): Result<Unit> = runCatching {
+        api.requeueAnalysis(sessionId)
+        Unit
     }
 }

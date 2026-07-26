@@ -141,9 +141,9 @@ class DefaultStudentProfileRepository @Inject constructor(
         val planDeferred = async {
             runCatching { api.getStudentMasterPlan(studentId).plan }.getOrNull()
         }
-        // Статус приглашения — best-effort: GET-эндпоинт ещё не готов (см. NivelApi
-        // TODO), 404/сбой → UNKNOWN (а не null), чтобы секция приглашения всё равно
-        // показывалась и тренер мог перевыпустить ссылку до появления реального GET.
+        // Статус приглашения — best-effort (#74): роут реальный и не 404-ит на «нет
+        // приглашения» (отдаёт status: "none"), но сбой сети/сервера здесь всё равно
+        // не должен ронять весь профиль — тогда UNKNOWN, секция просто не активна.
         val inviteDeferred = async {
             runCatching { api.getStudentInvite(studentId).toDomain(BuildConfig.API_BASE_URL) }
                 .getOrDefault(StudentInvite(InviteStatus.UNKNOWN, null, null))

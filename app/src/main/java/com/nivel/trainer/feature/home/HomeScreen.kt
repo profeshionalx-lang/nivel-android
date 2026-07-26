@@ -40,6 +40,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -244,7 +245,6 @@ private fun DashboardBody(
             emptyText = "Пока нет запланированных тренировок.",
             dateLabel = ::formatScheduledLabel,
             onOpenSession = onOpenSession,
-            modifier = Modifier.padding(top = 8.dp),
         )
         StudentsRow(
             count = overview.studentsCount,
@@ -310,11 +310,12 @@ private fun SessionCard(session: OverviewSession, dateLabel: String, onClick: ()
     Column(
         modifier = Modifier
             .width(208.dp)
-            .background(SurfaceCard, RoundedCornerShape(16.dp))
+            .clip(RoundedCornerShape(16.dp))
+            .background(SurfaceCard)
             .clickable(onClick = onClick)
             .heightIn(min = TouchTarget),
     ) {
-        Box(modifier = Modifier.fillMaxWidth().height(2.dp).background(Primary, RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp)))
+        Box(modifier = Modifier.fillMaxWidth().height(2.dp).background(Primary))
         Column(modifier = Modifier.padding(16.dp)) {
             Text(
                 text = session.studentName?.takeIf { it.isNotBlank() } ?: "Ученик",
@@ -342,7 +343,8 @@ private fun StudentsRow(count: Int, onClick: () -> Unit, modifier: Modifier = Mo
         modifier = modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp)
-            .background(SurfaceCard, RoundedCornerShape(16.dp))
+            .clip(RoundedCornerShape(16.dp))
+            .background(SurfaceCard)
             .clickable(onClick = onClick)
             .heightIn(min = TouchTarget + 16.dp)
             .padding(horizontal = 16.dp),

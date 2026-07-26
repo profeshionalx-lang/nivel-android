@@ -42,18 +42,23 @@ data class StudentsUiState(
     /** Ошибка сетевого обновления (кэш при этом сохраняется). */
     val error: String? = null,
     /**
-     * G3 (#32): последнее обновление с сервера упало по сети. Если при этом есть кэш —
-     * показываем оффлайн-баннер поверх данных, а не полноэкранную ошибку.
+     * G3 (#32): последнее обновление с сервера упало именно по сети (а не 401/500/иное).
+     * Определяет только текст баннера — сам факт показа решает [refreshFailed].
      */
     val offline: Boolean = false,
+    /**
+     * #71: последний рефреш провалился по любой причине (не только сеть — 401/500 тоже).
+     * Пока есть кэш, полноэкранную ошибку не показываем — баннер поверх данных с ретраем.
+     */
+    val refreshFailed: Boolean = false,
     /** Состояние bottom-sheet создания ученика. */
     val createSheet: CreateSheetState = CreateSheetState.Closed,
 ) {
     /** Истинный empty-state: загрузка завершена, ошибки нет, список пуст. */
     val isEmpty: Boolean get() = students.isEmpty() && !refreshing && error == null
 
-    /** G3: показываем оффлайн-баннер — сеть упала, но кэш есть. */
-    val showOfflineBanner: Boolean get() = offline && students.isNotEmpty()
+    /** #71: показываем баннер поверх кэша при любой неудаче рефреша — не только сетевой. */
+    val showOfflineBanner: Boolean get() = refreshFailed && students.isNotEmpty()
 }
 
 /**
@@ -80,9 +85,9 @@ class StudentsViewModel @Inject constructor(
     }
 
     /**
-     * Тянет свежий список с сервера; при сбое кэш остаётся. Сетевую ошибку (нет связи)
-     * помечаем флагом [StudentsUiState.offline] — UI покажет оффлайн-баннер поверх
-     * кэша вместо полноэкранной ошибки (G3, #32).
+     * Тянет свежий список с сервера; при сбое кэш остаётся. Любую неудачу рефреша
+     * (сеть, 401/500/иное) помечаем флагом [StudentsUiState.refreshFailed] — UI
+     * покажет баннер поверх кэша вместо полноэкранной ошибки (G3/#32, расширено #71).
      */
     fun refresh() {
         _uiState.update { it.copy(refreshing = true, error = null) }
@@ -94,6 +99,7 @@ class StudentsViewModel @Inject constructor(
                     refreshing = false,
                     error = failure?.let(::mapError),
                     offline = isNetworkError(failure),
+                    refreshFailed = failure != null,
                 )
             }
         }

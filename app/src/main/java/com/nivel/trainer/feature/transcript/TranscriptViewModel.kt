@@ -25,6 +25,8 @@ data class TranscriptUiState(
     val loading: Boolean = true,
     val transcript: Transcript? = null,
     val error: String? = null,
+    /** #71: рефреш поверх уже загруженного транскрипта (pull-to-refresh/возврат на экран). */
+    val refreshing: Boolean = false,
 )
 
 /**
@@ -52,25 +54,28 @@ class TranscriptViewModel @Inject constructor(
     private var loadJob: Job? = null
 
     /**
-     * Вызывается экраном с id из навигации. Идемпотентна: повторные вызовы для
-     * того же id (recompose, возврат на экран) не перезапускают загрузку.
+     * Вызывается экраном с id из навигации. #71: больше не идемпотентна — вызов для уже
+     * принятого id тоже перезапрашивает данные (возврат на экран, pull-to-refresh), только
+     * без полноэкранного спиннера поверх уже показанного транскрипта (см. [refresh]).
      */
     fun load(sessionId: String) {
-        if (this.sessionId == sessionId) return
         this.sessionId = sessionId
         refresh()
     }
 
     /**
-     * Тянет транскрипт с сервера. На сетевую ошибку показываем экран ошибки с
-     * «Повторить». Если статус транскрипта — `processing`, запускаем автополлинг.
+     * Тянет транскрипт с сервера. Если транскрипт уже на экране — рефреш идёт незаметно
+     * ([TranscriptUiState.refreshing]); иначе — полноэкранный спиннер ([loading]). На
+     * сетевую ошибку первичной загрузки показываем экран ошибки с «Повторить». Если статус
+     * транскрипта — `processing`, запускаем автополлинг.
      */
     fun refresh() {
         val id = sessionId ?: return
         // Отменяем предыдущую загрузку/опрос — иначе повторный refresh («Повторить»
         // или возврат на экран) запустил бы второй цикл опроса параллельно первому.
         loadJob?.cancel()
-        _uiState.update { it.copy(loading = true, error = null) }
+        val hasData = _uiState.value.transcript != null
+        _uiState.update { it.copy(loading = !hasData, refreshing = hasData, error = null) }
         loadJob = viewModelScope.launch {
             loadOnce(id)
             pollWhileProcessing(id)
@@ -81,14 +86,14 @@ class TranscriptViewModel @Inject constructor(
     private suspend fun loadOnce(id: String) {
         repository.getTranscript(id)
             .onSuccess { transcript ->
-                _uiState.update { it.copy(loading = false, transcript = transcript, error = null) }
+                _uiState.update { it.copy(loading = false, refreshing = false, transcript = transcript, error = null) }
             }
             .onFailure { e ->
-                _uiState.update {
+                _uiState.update { state ->
                     // Кэша нет: если данных ещё не было — показываем ошибку,
                     // иначе оставляем последний снимок (сетевой сбой при опросе).
-                    if (it.transcript == null) it.copy(loading = false, error = mapError(e))
-                    else it.copy(loading = false)
+                    if (state.transcript == null) state.copy(loading = false, refreshing = false, error = mapError(e))
+                    else state.copy(loading = false, refreshing = false)
                 }
             }
     }

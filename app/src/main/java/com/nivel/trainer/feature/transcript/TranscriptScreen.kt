@@ -26,9 +26,13 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
+import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -54,6 +58,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.nivel.trainer.domain.Transcript
 import com.nivel.trainer.domain.TranscriptSegment
 import com.nivel.trainer.domain.TranscriptStatus
+import com.nivel.trainer.ui.state.RefreshOnResume
 import com.nivel.trainer.ui.theme.NivelTheme
 
 // Цвета один-в-один из веб-Nivel (src/app/globals.css), как на других экранах (B4/B5).
@@ -92,12 +97,14 @@ fun TranscriptScreen(
     viewModel: TranscriptViewModel = hiltViewModel(),
 ) {
     LaunchedEffect(sessionId) { viewModel.load(sessionId) }
+    RefreshOnResume(onRefresh = viewModel::refresh)
     val state by viewModel.uiState.collectAsStateWithLifecycle()
 
     TranscriptContent(
         sessionId = sessionId,
         loading = state.loading,
         error = state.error,
+        refreshing = state.refreshing,
         transcript = state.transcript,
         onBack = onBack,
         onRetry = viewModel::refresh,
@@ -105,6 +112,7 @@ fun TranscriptScreen(
     )
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun TranscriptContent(
     sessionId: String,
@@ -114,6 +122,7 @@ private fun TranscriptContent(
     onBack: () -> Unit,
     onRetry: () -> Unit,
     modifier: Modifier = Modifier,
+    refreshing: Boolean = false,
 ) {
     Column(
         modifier = modifier
@@ -122,11 +131,29 @@ private fun TranscriptContent(
     ) {
         Header(onBack = onBack)
 
-        when {
-            loading && transcript == null -> CenterBox { CircularProgressIndicator(color = Primary) }
-            error != null && transcript == null -> CenterBox { ErrorState(error, onRetry) }
-            transcript != null -> TranscriptBody(sessionId = sessionId, transcript = transcript)
-            else -> CenterBox { EmptyState() }
+        // #71: pull-to-refresh — рефреш поверх уже загруженного транскрипта, без спиннера.
+        val pullState = rememberPullToRefreshState()
+        PullToRefreshBox(
+            isRefreshing = refreshing,
+            onRefresh = onRetry,
+            modifier = Modifier.fillMaxSize(),
+            state = pullState,
+            indicator = {
+                PullToRefreshDefaults.Indicator(
+                    modifier = Modifier.align(Alignment.TopCenter),
+                    isRefreshing = refreshing,
+                    state = pullState,
+                    containerColor = SurfaceCard,
+                    color = Primary,
+                )
+            },
+        ) {
+            when {
+                loading && transcript == null -> CenterBox { CircularProgressIndicator(color = Primary) }
+                error != null && transcript == null -> CenterBox { ErrorState(error, onRetry) }
+                transcript != null -> TranscriptBody(sessionId = sessionId, transcript = transcript)
+                else -> CenterBox { EmptyState() }
+            }
         }
     }
 }

@@ -106,6 +106,10 @@ fun NivelNavHost(
         composable(NivelRoutes.HOME) {
             HomeScreen(
                 onOpenStudents = { navController.navigate(NivelRoutes.STUDENTS) },
+                // A6 (#76) — тап по карточке сессии в дашборде открывает её карточку.
+                onOpenSession = { sessionId ->
+                    navController.navigate(NivelRoutes.sessionDetail(sessionId))
+                },
                 // #72: выход подтверждён — назад на login, полностью сбросив бэк-стек.
                 onLoggedOut = {
                     navController.navigate(NivelRoutes.LOGIN) {

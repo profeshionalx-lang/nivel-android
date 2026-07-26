@@ -238,3 +238,24 @@ data class TranscriptSegment(
     val text: String,
     val avgLogprob: Double?,
 )
+
+/** Агрегат домашнего экрана тренера (A6, #76): счётчик учеников + две карусели сессий. */
+data class TrainerOverview(
+    val studentsCount: Int,
+    val upcomingSessions: List<OverviewSession>,
+    val pendingReview: List<OverviewSession>,
+)
+
+/**
+ * Сессия в карусели домашнего экрана. Общий контракт для обеих категорий
+ * (upcoming/pending) — различаются только тем, какая дата из ответа сервера
+ * сюда попала (`scheduled_at` либо `completed_at`); UI подписывает карусели
+ * по контексту, дублировать поля под каждую категорию не нужно.
+ */
+data class OverviewSession(
+    val id: String,
+    val studentId: String,
+    val studentName: String?,
+    val sessionNumber: Int?,
+    val date: String?,
+)

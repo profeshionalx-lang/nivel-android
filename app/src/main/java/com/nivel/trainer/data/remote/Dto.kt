@@ -520,3 +520,38 @@ data class DeviceTokenRequest(
     val token: String,
     val platform: String = "android",
 )
+
+// -----------------------------------------------------------------------------
+// A6 (#76) — агрегат домашнего экрана тренера.
+// -----------------------------------------------------------------------------
+
+/**
+ * Ответ `GET /api/v1/trainer/overview` (NIVEL#224, `getTrainerOverviewCore`):
+ * счётчик учеников + до 10 ближайших/ожидающих разбора сессий каждой категории.
+ */
+@Serializable
+data class TrainerOverviewResponse(
+    @SerialName("students_count") val studentsCount: Int,
+    @SerialName("upcoming_sessions") val upcomingSessions: List<OverviewUpcomingSessionDto>,
+    @SerialName("pending_review") val pendingReview: List<OverviewPendingSessionDto>,
+)
+
+/** Элемент `upcoming_sessions` — предстоящая тренировка. `studentName`/`sessionNumber` nullable (сервер). */
+@Serializable
+data class OverviewUpcomingSessionDto(
+    val id: String,
+    @SerialName("student_id") val studentId: String,
+    @SerialName("student_name") val studentName: String? = null,
+    @SerialName("session_number") val sessionNumber: Int? = null,
+    @SerialName("scheduled_at") val scheduledAt: String? = null,
+)
+
+/** Элемент `pending_review` — завершённая сессия без разбора тренера. */
+@Serializable
+data class OverviewPendingSessionDto(
+    val id: String,
+    @SerialName("student_id") val studentId: String,
+    @SerialName("student_name") val studentName: String? = null,
+    @SerialName("session_number") val sessionNumber: Int? = null,
+    @SerialName("completed_at") val completedAt: String? = null,
+)

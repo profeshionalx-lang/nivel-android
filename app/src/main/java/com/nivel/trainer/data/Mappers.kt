@@ -7,6 +7,8 @@ import com.nivel.trainer.data.remote.GoalDto
 import com.nivel.trainer.data.remote.MasterPlanDto
 import com.nivel.trainer.data.remote.MasterPlanItemDto
 import com.nivel.trainer.data.remote.MasterPlanSectionDto
+import com.nivel.trainer.data.remote.OverviewPendingSessionDto
+import com.nivel.trainer.data.remote.OverviewUpcomingSessionDto
 import com.nivel.trainer.data.remote.ProblemDto
 import com.nivel.trainer.data.remote.SessionDetailResponse
 import com.nivel.trainer.data.remote.SessionInsightCardDto
@@ -16,6 +18,7 @@ import com.nivel.trainer.data.remote.StudentDetailResponse
 import com.nivel.trainer.data.remote.StudentDto
 import com.nivel.trainer.data.remote.StudentInviteResponse
 import com.nivel.trainer.data.remote.StudentSessionDto
+import com.nivel.trainer.data.remote.TrainerOverviewResponse
 import com.nivel.trainer.data.remote.TranscriptResponse
 import com.nivel.trainer.data.remote.TranscriptSegmentDto
 import com.nivel.trainer.domain.Goal
@@ -24,6 +27,7 @@ import com.nivel.trainer.domain.InviteStatus
 import com.nivel.trainer.domain.MasterPlan
 import com.nivel.trainer.domain.MasterPlanItem
 import com.nivel.trainer.domain.MasterPlanSection
+import com.nivel.trainer.domain.OverviewSession
 import com.nivel.trainer.domain.Problem
 import com.nivel.trainer.domain.SessionAudioStatus
 import com.nivel.trainer.domain.SessionDetail
@@ -32,6 +36,7 @@ import com.nivel.trainer.domain.Student
 import com.nivel.trainer.domain.StudentInvite
 import com.nivel.trainer.domain.StudentProfile
 import com.nivel.trainer.domain.StudentSession
+import com.nivel.trainer.domain.TrainerOverview
 import com.nivel.trainer.domain.TrainingSession
 import com.nivel.trainer.domain.Transcript
 import com.nivel.trainer.domain.TranscriptSegment
@@ -319,6 +324,29 @@ fun SessionInsightCardDto.toDomain(sessionId: String) = InsightCard(
     studentDecision = studentDecision,
     position = position,
     createdAt = createdAt,
+)
+
+/** Агрегат домашнего экрана тренера (A6, #76) → доменная модель. */
+fun TrainerOverviewResponse.toDomain() = TrainerOverview(
+    studentsCount = studentsCount,
+    upcomingSessions = upcomingSessions.map { it.toDomain() },
+    pendingReview = pendingReview.map { it.toDomain() },
+)
+
+fun OverviewUpcomingSessionDto.toDomain() = OverviewSession(
+    id = id,
+    studentId = studentId,
+    studentName = studentName,
+    sessionNumber = sessionNumber,
+    date = scheduledAt,
+)
+
+fun OverviewPendingSessionDto.toDomain() = OverviewSession(
+    id = id,
+    studentId = studentId,
+    studentName = studentName,
+    sessionNumber = sessionNumber,
+    date = completedAt,
 )
 
 /** Тот же DTO → Room-entity для кэша карточек (B3). `sessionId` из пути. */

@@ -106,6 +106,12 @@ fun NivelNavHost(
         composable(NivelRoutes.HOME) {
             HomeScreen(
                 onOpenStudents = { navController.navigate(NivelRoutes.STUDENTS) },
+                // #72: выход подтверждён — назад на login, полностью сбросив бэк-стек.
+                onLoggedOut = {
+                    navController.navigate(NivelRoutes.LOGIN) {
+                        popUpTo(0) { inclusive = true }
+                    }
+                },
             )
         }
 

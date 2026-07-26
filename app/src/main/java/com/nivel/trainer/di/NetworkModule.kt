@@ -6,6 +6,7 @@ import com.nivel.trainer.data.remote.AudioPipelineApi
 import com.nivel.trainer.data.remote.AuthInterceptor
 import com.nivel.trainer.data.remote.InsightsApi
 import com.nivel.trainer.data.remote.NivelApi
+import com.nivel.trainer.data.remote.UnauthorizedInterceptor
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -52,7 +53,10 @@ object NetworkModule {
 
     @Provides
     @Singleton
-    fun provideOkHttpClient(authInterceptor: AuthInterceptor): OkHttpClient {
+    fun provideOkHttpClient(
+        authInterceptor: AuthInterceptor,
+        unauthorizedInterceptor: UnauthorizedInterceptor,
+    ): OkHttpClient {
         val logging = HttpLoggingInterceptor().apply {
             level = if (BuildConfig.DEBUG) {
                 HttpLoggingInterceptor.Level.BODY
@@ -62,6 +66,7 @@ object NetworkModule {
         }
         return OkHttpClient.Builder()
             .addInterceptor(authInterceptor)
+            .addInterceptor(unauthorizedInterceptor)
             .addInterceptor(logging)
             .build()
     }
@@ -98,9 +103,13 @@ object NetworkModule {
     @Provides
     @Singleton
     @PipelineClient
-    fun providePipelineClient(authInterceptor: AuthInterceptor): OkHttpClient =
+    fun providePipelineClient(
+        authInterceptor: AuthInterceptor,
+        unauthorizedInterceptor: UnauthorizedInterceptor,
+    ): OkHttpClient =
         OkHttpClient.Builder()
             .addInterceptor(authInterceptor)
+            .addInterceptor(unauthorizedInterceptor)
             .addInterceptor(loggingInterceptor())
             .connectTimeout(30, TimeUnit.SECONDS)
             .readTimeout(6, TimeUnit.MINUTES)
@@ -144,7 +153,10 @@ object NetworkModule {
     @Provides
     @Singleton
     @InsightsClient
-    fun provideInsightsOkHttpClient(authInterceptor: AuthInterceptor): OkHttpClient {
+    fun provideInsightsOkHttpClient(
+        authInterceptor: AuthInterceptor,
+        unauthorizedInterceptor: UnauthorizedInterceptor,
+    ): OkHttpClient {
         val logging = HttpLoggingInterceptor().apply {
             level = if (BuildConfig.DEBUG) {
                 HttpLoggingInterceptor.Level.BODY
@@ -155,6 +167,7 @@ object NetworkModule {
         // Генерация инсайтов идёт инлайн до ~5 мин — даём запас по read/call-timeout.
         return OkHttpClient.Builder()
             .addInterceptor(authInterceptor)
+            .addInterceptor(unauthorizedInterceptor)
             .addInterceptor(logging)
             .connectTimeout(30, TimeUnit.SECONDS)
             .readTimeout(330, TimeUnit.SECONDS)

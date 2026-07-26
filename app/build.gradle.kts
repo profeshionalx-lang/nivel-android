@@ -151,6 +151,9 @@ dependencies {
     implementation(libs.androidx.datastore.preferences)
     implementation(libs.kotlinx.coroutines.android)
 
+    // #72 — шифрование bearer-токена в DataStore (AES256-GCM, ключ в Android Keystore).
+    implementation(libs.tink.android)
+
     implementation(libs.androidx.room.runtime)
     implementation(libs.androidx.room.ktx)
     ksp(libs.androidx.room.compiler)

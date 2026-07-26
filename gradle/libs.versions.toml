@@ -24,6 +24,7 @@ work = "2.9.1"
 hiltWork = "1.2.0"
 googleServices = "4.4.2"
 firebaseBom = "33.0.0"
+tink = "1.23.0"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -69,6 +70,9 @@ androidx-hilt-compiler = { group = "androidx.hilt", name = "hilt-compiler", vers
 # G2 (#31) — FCM push. BOM управляет версией firebase-messaging.
 firebase-bom = { group = "com.google.firebase", name = "firebase-bom", version.ref = "firebaseBom" }
 firebase-messaging-ktx = { group = "com.google.firebase", name = "firebase-messaging-ktx" }
+
+# #72 — шифрование bearer-токена (AES256-GCM, ключ в Android Keystore).
+tink-android = { group = "com.google.crypto.tink", name = "tink-android", version.ref = "tink" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

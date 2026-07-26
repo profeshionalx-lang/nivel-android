@@ -21,6 +21,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import retrofit2.HttpException
 import javax.inject.Inject
 
 /**
@@ -396,17 +397,12 @@ class SessionDetailViewModel @Inject constructor(
         }
     }
 
-    /** «Другая коллекция» — назад к списку без повторного запроса (уже загружен). */
-    fun backToCollectionsList() {
-        _uiState.update { state ->
-            val current = state.librarySheet
-            if (current !is LibrarySheetState.PreviewCollection) return@update state
-            state.copy(librarySheet = LibrarySheetState.ListCollections(loading = false))
-        }
-        // Список коллекций короткоживущий и дешёвый — перезапрашиваем, чтобы не таскать
-        // его отдельно в состоянии превью ради одного возврата назад.
-        openLibrarySheet()
-    }
+    /**
+     * «Другая коллекция» — назад к списку. Список короткоживущий и дешёвый — проще
+     * перезапросить заново, чем таскать его отдельно в состоянии превью ради одного
+     * возврата назад; [openLibrarySheet] сама сбрасывает состояние на `ListCollections`.
+     */
+    fun backToCollectionsList() = openLibrarySheet()
 
     /** Применяет выбранную коллекцию к текущей сессии; при успехе перечитывает карточки. */
     fun applySelectedCollection() {
@@ -436,6 +432,8 @@ class SessionDetailViewModel @Inject constructor(
     private fun mapError(e: Throwable): String = when {
         // G3 (#32): сетевую ошибку показываем понятной «нет связи» формулировкой.
         isNetworkError(e) -> "Нет подключения к интернету. Проверьте сеть и повторите."
+        // #78: чужая коллекция → 403 — понятный текст вместо «HTTP 403 Forbidden».
+        e is HttpException && e.code() == 403 -> "Нет доступа к этой коллекции."
         else -> e.message?.takeIf { it.isNotBlank() } ?: "Что-то пошло не так. Попробуйте снова."
     }
 }

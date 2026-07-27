@@ -22,12 +22,20 @@ import java.io.File
 import javax.inject.Inject
 
 /**
- * Foreground-сервис фоновой записи тренировки (C1).
+ * Foreground-сервис фоновой записи тренировки (C1; аудио-сайдкар видео-режима — A4/#98).
  *
  * Тип `microphone` + видимое уведомление со встроенным таймером и кнопкой «Стоп».
  * Запись идёт в `MediaRecorder` (AAC в контейнере MPEG-4 → `.m4a` — формат уже
  * принимается конвейером транскрипции) и не прерывается при локе экрана/сворачивании,
  * потому что сервис в foreground и держит микрофон.
+ *
+ * Один и тот же сервис обслуживает два режима ([RecordingMode], `EXTRA_MODE`):
+ * - [RecordingMode.AUDIO] (по умолчанию, без `EXTRA_MODE`) — как раньше, поведение
+ *   не изменилось ни на байт: результат идёт напрямую в [RecordingController.update].
+ * - [RecordingMode.VIDEO] — параллельный сайдкар звука (вариант B): та же запись в
+ *   `MediaRecorder`, но результат репортится через [RecordingController.onAudioSidecarStarted]/
+ *   [RecordingController.onAudioSidecarFinished], чтобы не затирать видео-часть
+ *   состояния, которой владеет экран записи (CameraX).
  *
  * Состоянием владеет [RecordingController] (process-wide). Сервис — единственный,
  * кто запускает/останавливает `MediaRecorder` и сообщает результат в контроллер.
@@ -44,12 +52,18 @@ class RecordingService : Service() {
     private var sessionId: String? = null
     private var outputFile: File? = null
     private var startedElapsedRealtimeMs: Long = 0L
+    private var mode: RecordingMode = RecordingMode.AUDIO
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
-            ACTION_START -> startRecording(intent.getStringExtra(EXTRA_SESSION_ID))
+            ACTION_START -> {
+                val requestedMode = intent.getStringExtra(EXTRA_MODE)
+                    ?.let { runCatching { RecordingMode.valueOf(it) }.getOrNull() }
+                    ?: RecordingMode.AUDIO
+                startRecording(intent.getStringExtra(EXTRA_SESSION_ID), requestedMode)
+            }
             ACTION_STOP -> stopRecording()
             else -> stopSelf()
         }
@@ -58,9 +72,10 @@ class RecordingService : Service() {
         return START_NOT_STICKY
     }
 
-    private fun startRecording(sessionId: String?) {
+    private fun startRecording(sessionId: String?, mode: RecordingMode) {
         // Повторный старт во время активной записи игнорируем.
         if (recorder != null) return
+        this.mode = mode
 
         startedElapsedRealtimeMs = SystemClock.elapsedRealtime()
         val hasMic = ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) ==
@@ -70,19 +85,22 @@ class RecordingService : Service() {
         // течение ~5с, иначе система роняет процесс. Поднимаем foreground всегда; тип
         // microphone — только при наличии разрешения (без него FGS-microphone на 14+
         // бросает SecurityException, поэтому деградируем до типа «none»).
+        // Тип сервиса всегда `microphone` независимо от режима — камерой в видео-режиме
+        // владеет CameraX на самом экране записи (foreground Activity), не этот сервис,
+        // поэтому FOREGROUND_SERVICE_CAMERA здесь не нужен (см. AndroidManifest.xml).
         if (!promoteToForeground(useMicrophoneType = hasMic)) {
-            controller.update(RecordingState.Error(sessionId, "Не удалось запустить сервис записи"))
+            reportError(sessionId, mode, "Не удалось запустить сервис записи")
             stopSelf()
             return
         }
 
         if (sessionId.isNullOrBlank()) {
-            controller.update(RecordingState.Error(null, "Не выбрана тренировка для записи"))
+            reportError(null, mode, "Не выбрана тренировка для записи")
             finishForeground()
             return
         }
         if (!hasMic) {
-            controller.update(RecordingState.Error(sessionId, "Нет разрешения на запись звука"))
+            reportError(sessionId, mode, "Нет разрешения на запись звука")
             finishForeground()
             return
         }
@@ -104,7 +122,7 @@ class RecordingService : Service() {
         } catch (e: Exception) {
             runCatching { mr.release() }
             file.delete()
-            controller.update(RecordingState.Error(sessionId, e.message ?: "Не удалось начать запись"))
+            reportError(sessionId, mode, e.message ?: "Не удалось начать запись")
             finishForeground()
             return
         }
@@ -112,19 +130,27 @@ class RecordingService : Service() {
         recorder = mr
         this.sessionId = sessionId
         outputFile = file
-        controller.update(
-            RecordingState.Recording(
+        when (mode) {
+            RecordingMode.AUDIO -> controller.update(
+                RecordingState.Recording(
+                    sessionId = sessionId,
+                    outputPath = file.absolutePath,
+                    startedElapsedRealtimeMs = startedElapsedRealtimeMs,
+                ),
+            )
+            RecordingMode.VIDEO -> controller.onAudioSidecarStarted(
                 sessionId = sessionId,
-                outputPath = file.absolutePath,
+                audioPath = file.absolutePath,
                 startedElapsedRealtimeMs = startedElapsedRealtimeMs,
-            ),
-        )
+            )
+        }
     }
 
     private fun stopRecording() {
         val mr = recorder
         val file = outputFile
         val id = sessionId
+        val recordingMode = mode
         if (mr == null || file == null || id == null) {
             // Нечего останавливать (или уже остановлено) — просто гасим сервис.
             finishForeground()
@@ -142,18 +168,33 @@ class RecordingService : Service() {
         recorder = null
 
         if (stoppedOk && file.exists() && file.length() > 0) {
-            controller.update(
-                RecordingState.Finished(sessionId = id, outputPath = file.absolutePath, durationMs = durationMs),
-            )
+            when (recordingMode) {
+                RecordingMode.AUDIO -> controller.update(
+                    RecordingState.Finished(sessionId = id, outputPath = file.absolutePath, durationMs = durationMs),
+                )
+                RecordingMode.VIDEO -> controller.onAudioSidecarFinished(
+                    sessionId = id,
+                    audioPath = file.absolutePath,
+                    durationMs = durationMs,
+                )
+            }
         } else {
             // `stop()` бросает, если запись слишком короткая (нет кадров) — файл невалиден.
             file.delete()
-            controller.update(RecordingState.Error(id, "Запись слишком короткая или повреждена"))
+            reportError(id, recordingMode, "Запись слишком короткая или повреждена")
         }
 
         sessionId = null
         outputFile = null
         finishForeground()
+    }
+
+    /** Репорт ошибки в контроллер с учётом режима — AUDIO идёт напрямую в [RecordingController.update]. */
+    private fun reportError(sessionId: String?, mode: RecordingMode, message: String) {
+        when (mode) {
+            RecordingMode.AUDIO -> controller.update(RecordingState.Error(sessionId, message))
+            RecordingMode.VIDEO -> controller.onAudioSidecarError(sessionId, message)
+        }
     }
 
     override fun onDestroy() {
@@ -250,6 +291,9 @@ class RecordingService : Service() {
         const val ACTION_START = "com.nivel.trainer.recording.START"
         const val ACTION_STOP = "com.nivel.trainer.recording.STOP"
         const val EXTRA_SESSION_ID = "extra_session_id"
+
+        /** Имя [RecordingMode] (A4, #98) — отсутствует ⇒ [RecordingMode.AUDIO] (поведение не менялось). */
+        const val EXTRA_MODE = "extra_mode"
 
         private const val CHANNEL_ID = "recording"
         private const val NOTIFICATION_ID = 1001

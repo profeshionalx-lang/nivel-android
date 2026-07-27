@@ -2,20 +2,30 @@ package com.nivel.trainer.service
 
 import android.content.Context
 import android.content.Intent
+import android.os.SystemClock
 import androidx.core.content.ContextCompat
+import com.nivel.trainer.data.local.LocalVideoStore
+import com.nivel.trainer.data.local.VideoRecord
 import com.nivel.trainer.service.upload.AudioUploadScheduler
 import dagger.hilt.android.qualifiers.ApplicationContext
+import java.io.File
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
  * Режим записи (A3, #97), выбирается тренером **до** старта:
  * - [AUDIO] — как раньше, телефон в кармане, экран может гаснуть, пишет `MediaRecorder`.
- * - [VIDEO] — телефон на штативе, экран не гаснет, пишет CameraX `Recorder` БЕЗ звука
- *   (звук в видео-режиме параллельным `MediaRecorder` добавит A4/#98, здесь его нет).
+ * - [VIDEO] — телефон на штативе, экран не гаснет, пишет CameraX `Recorder` БЕЗ звука;
+ *   звук пишет параллельный `MediaRecorder` (вариант B, A4/#98) — тот же
+ *   [RecordingService], но как «сайдкар»: файл уезжает на сервер, видео остаётся
+ *   только на телефоне (эпик NIVEL#235).
  */
 enum class RecordingMode { AUDIO, VIDEO }
 
@@ -37,18 +47,27 @@ sealed interface RecordingState {
      * `SystemClock.elapsedRealtime()` на момент старта, по нему UI/уведомление считают
      * длительность (монотонные часы, не зависят от перевода системного времени).
      */
+    /**
+     * [audioStartOffsetMs] — только для [RecordingMode.VIDEO] (A4, #98): разница
+     * `audioStartedElapsedRealtimeMs - startedElapsedRealtimeMs` (видео стартует первым
+     * и владеет [startedElapsedRealtimeMs]), заполняется как только аудио-сайдкар
+     * реально начал писать — до этого момента `null`.
+     */
     data class Recording(
         val sessionId: String,
         val startedElapsedRealtimeMs: Long,
         val mode: RecordingMode = RecordingMode.AUDIO,
         val outputPath: String? = null,
         val videoPath: String? = null,
+        val audioStartOffsetMs: Long? = null,
     ) : RecordingState
 
     /**
      * Запись завершена длительностью [durationMs]. Аудио-файл [outputPath] ждёт
      * заливки (C3); видео-файл [videoPath] остаётся только локально — на сервер
-     * видео не уезжает (см. эпик NIVEL#235), заливки для него нет.
+     * видео не уезжает (см. эпик NIVEL#235), заливки для него нет. [audioStartOffsetMs] —
+     * см. докблок [Recording], нужен для скрабера (A6), чтобы поправить таймкод момента
+     * на рассинхрон стартов двух рекордеров.
      */
     data class Finished(
         val sessionId: String,
@@ -56,6 +75,7 @@ sealed interface RecordingState {
         val mode: RecordingMode = RecordingMode.AUDIO,
         val outputPath: String? = null,
         val videoPath: String? = null,
+        val audioStartOffsetMs: Long? = null,
     ) : RecordingState
 
     /** Ошибка записи (нет разрешения, занят микрофон/камера, сбой кодека, мало места). */
@@ -81,9 +101,26 @@ sealed interface RecordingState {
 class RecordingController @Inject constructor(
     @ApplicationContext private val context: Context,
     private val uploadScheduler: AudioUploadScheduler,
+    private val localVideoStore: LocalVideoStore,
 ) {
     private val _state = MutableStateFlow<RecordingState>(RecordingState.Idle)
     val state: StateFlow<RecordingState> = _state.asStateFlow()
+
+    // Скоуп для suspend-записи в LocalVideoStore (DataStore) — сама точка входа
+    // (onAudioSidecarFinished/videoFinished) синхронная, IO — на фоне. Как и в
+    // TokenStore, скоуп синглтона живёт весь процесс, отдельно не отменяем.
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    // Половинки видео-сессии (A4, #98): CameraX и аудио-сайдкар финализируются
+    // независимо и в произвольном порядке — копим то, что пришло первым, и не
+    // публикуем итоговый Finished, пока не придут ОБЕ части.
+    private data class PendingVideo(val sessionId: String, val videoPath: String, val durationMs: Long)
+    private data class PendingAudio(val sessionId: String, val audioPath: String, val durationMs: Long)
+    private data class ActiveVideoStart(val startedAtEpochMs: Long, val startedElapsedRealtimeMs: Long)
+
+    @Volatile private var pendingVideo: PendingVideo? = null
+    @Volatile private var pendingAudio: PendingAudio? = null
+    @Volatile private var activeVideoStart: ActiveVideoStart? = null
 
     /**
      * Запустить аудио-запись для сессии. Поднимает foreground-сервис (тип microphone).
@@ -105,11 +142,11 @@ class RecordingController @Inject constructor(
     /**
      * Остановить аудио-запись и завершить сервис. Файл остаётся на диске для заливки.
      *
-     * Команду шлём только когда идёт именно аудио-запись: тогда сервис жив в foreground
-     * и `startService` гарантированно доставит интент. Иначе (записи нет, либо это
-     * видео-запись — ей владеет CameraX на экране записи, не сервис) команду не шлём:
-     * на Android 8+ запуск фонового сервиса из фона бросает исключение, а для видео
-     * стоп идёт напрямую через рекордер экрана (см. [RecorderScreen][com.nivel.trainer.feature.recorder.RecorderScreen]).
+     * Команду шлём только когда идёт именно аудио-запись сервисом в режиме
+     * [RecordingMode.AUDIO]: тогда сервис жив в foreground и `startService`
+     * гарантированно доставит интент. Для видео-режима стоп CameraX идёт напрямую
+     * через рекордер экрана (см. [RecorderScreen][com.nivel.trainer.feature.recorder.RecorderScreen]),
+     * а аудио-сайдкар (A4, #98) останавливается отдельно через [stopAudioSidecar].
      */
     fun stop() {
         val current = _state.value
@@ -140,6 +177,149 @@ class RecordingController @Inject constructor(
         // заливку получит только звук в A4) — для него заливку не ставим.
         if (state is RecordingState.Finished && state.mode == RecordingMode.AUDIO && state.outputPath != null) {
             uploadScheduler.enqueue(sessionId = state.sessionId, filePath = state.outputPath)
+        }
+    }
+
+    // --- Видео-режим: CameraX (A3, #97) + аудио-сайдкар (A4, #98) ---
+
+    /**
+     * Экран записи (через [RecorderViewModel]) сообщает: CameraX начал писать
+     * [videoPath] в момент [startedElapsedRealtimeMs]. Именно этот момент становится
+     * `startedElapsedRealtimeMs` всей видео-сессии — аудио-сайдкар стартует чуть позже
+     * (см. [onAudioSidecarStarted]), разница и есть [RecordingState.Recording.audioStartOffsetMs].
+     */
+    fun videoStarted(sessionId: String, videoPath: String, startedElapsedRealtimeMs: Long) {
+        pendingVideo = null
+        pendingAudio = null
+        activeVideoStart = ActiveVideoStart(System.currentTimeMillis(), startedElapsedRealtimeMs)
+        _state.value = RecordingState.Recording(
+            sessionId = sessionId,
+            startedElapsedRealtimeMs = startedElapsedRealtimeMs,
+            mode = RecordingMode.VIDEO,
+            videoPath = videoPath,
+        )
+    }
+
+    /**
+     * Попросить [RecordingService] начать параллельный `MediaRecorder` для звука
+     * (вариант B, A4/#98) — тот же сервис, что и в аудио-режиме, но с
+     * `EXTRA_MODE=VIDEO`: пишет в такой же `.m4a`, но репортит через
+     * [onAudioSidecarStarted]/[onAudioSidecarFinished] вместо прямого [update],
+     * чтобы не затирать видео-часть состояния. Зовётся сразу после [videoStarted] —
+     * максимально близко по времени к старту CameraX (см. класс-докблок [RecordingMode]).
+     */
+    fun startAudioSidecar(sessionId: String) {
+        if (!RecordingPermissions.hasMicPermission(context)) {
+            onAudioSidecarError(sessionId, "Нет разрешения на запись звука")
+            return
+        }
+        val intent = Intent(context, RecordingService::class.java).apply {
+            action = RecordingService.ACTION_START
+            putExtra(RecordingService.EXTRA_SESSION_ID, sessionId)
+            putExtra(RecordingService.EXTRA_MODE, RecordingMode.VIDEO.name)
+        }
+        ContextCompat.startForegroundService(context, intent)
+    }
+
+    /** Остановить аудио-сайдкар видео-режима (кнопка «Стоп» видео-flow). */
+    fun stopAudioSidecar() {
+        val intent = Intent(context, RecordingService::class.java).apply {
+            action = RecordingService.ACTION_STOP
+        }
+        context.startService(intent)
+    }
+
+    /** [RecordingService] сообщает: аудио-сайдкар реально начал писать. */
+    internal fun onAudioSidecarStarted(sessionId: String, audioPath: String, startedElapsedRealtimeMs: Long) {
+        val current = _state.value
+        if (current is RecordingState.Recording && current.mode == RecordingMode.VIDEO && current.sessionId == sessionId) {
+            val offsetMs = startedElapsedRealtimeMs - current.startedElapsedRealtimeMs
+            _state.value = current.copy(outputPath = audioPath, audioStartOffsetMs = offsetMs)
+        }
+    }
+
+    /**
+     * [RecordingService] сообщает: аудио-сайдкар не смог начать/сохранить запись.
+     * Без звука транскрипции не будет — весь видео-разбор смысла не имеет (кадры без
+     * звука нечем привязать к моментам), поэтому это ошибка всей сессии, а не только
+     * аудио-части. Видеофайл при этом может остаться на диске — CameraX его не трогает.
+     */
+    internal fun onAudioSidecarError(sessionId: String?, message: String) {
+        pendingVideo = null
+        pendingAudio = null
+        activeVideoStart = null
+        _state.value = RecordingState.Error(sessionId, "Не удалось записать звук: $message", RecordingMode.VIDEO)
+    }
+
+    /** [RecordingService] сообщает: аудио-сайдкар успешно дописан и закрыт. */
+    internal fun onAudioSidecarFinished(sessionId: String, audioPath: String, durationMs: Long) {
+        pendingAudio = PendingAudio(sessionId, audioPath, durationMs)
+        tryFinalizeVideoSession(sessionId)
+    }
+
+    /** Экран записи сообщает: CameraX финализировал видеофайл. */
+    fun videoFinished(sessionId: String, videoPath: String, durationMs: Long) {
+        pendingVideo = PendingVideo(sessionId, videoPath, durationMs)
+        tryFinalizeVideoSession(sessionId)
+    }
+
+    /**
+     * Экран записи сообщает: видеозапись не удалась (сбой камеры, обрыв без данных).
+     * Аудио-сайдкар останавливаем вместе с ней — без кадров карточки «до/после» не
+     * собрать, оставлять запись звука дальше идти незачем (полноценная деградация до
+     * аудио-режима на сбое камеры — вне acceptance этой задачи, см. PR).
+     */
+    fun videoError(sessionId: String?, message: String) {
+        stopAudioSidecar()
+        pendingVideo = null
+        pendingAudio = null
+        activeVideoStart = null
+        _state.value = RecordingState.Error(sessionId, message, RecordingMode.VIDEO)
+    }
+
+    /**
+     * Публикует [RecordingState.Finished] и запускает хэндофф, только когда обе
+     * половинки видео-сессии (видео от CameraX + аудио от сервиса) уже собраны —
+     * они финализируются независимо и в произвольном порядке.
+     */
+    private fun tryFinalizeVideoSession(sessionId: String) {
+        val video = pendingVideo?.takeIf { it.sessionId == sessionId } ?: return
+        val audio = pendingAudio?.takeIf { it.sessionId == sessionId } ?: return
+        val offsetMs = (_state.value as? RecordingState.Recording)?.audioStartOffsetMs
+        val videoStart = activeVideoStart
+        pendingVideo = null
+        pendingAudio = null
+        activeVideoStart = null
+
+        _state.value = RecordingState.Finished(
+            sessionId = sessionId,
+            durationMs = video.durationMs,
+            mode = RecordingMode.VIDEO,
+            outputPath = audio.audioPath,
+            videoPath = video.videoPath,
+            audioStartOffsetMs = offsetMs,
+        )
+        // Хэндофф: в очередь заливки уходит ТОЛЬКО аудио (существующий шедулер, ничего
+        // в нём не меняем) — видео на сервер не уезжает (эпик NIVEL#235).
+        uploadScheduler.enqueue(sessionId = sessionId, filePath = audio.audioPath)
+
+        // LocalVideoStore (A4, #98): регистрируем видео, чтобы экран сессии (A8) мог
+        // предложить «Выбрать кадр». Пишем в фоне — DataStore suspend, а этот метод
+        // синхронный (зовётся из RecordingService/RecorderViewModel).
+        val videoFile = File(video.videoPath)
+        scope.launch {
+            localVideoStore.put(
+                VideoRecord(
+                    sessionId = sessionId,
+                    videoPath = video.videoPath,
+                    startedAtEpochMs = videoStart?.startedAtEpochMs ?: System.currentTimeMillis(),
+                    startedAtElapsedRealtimeMs = videoStart?.startedElapsedRealtimeMs
+                        ?: SystemClock.elapsedRealtime(),
+                    durationMs = video.durationMs,
+                    audioStartOffsetMs = offsetMs,
+                    sizeBytes = videoFile.length(),
+                ),
+            )
         }
     }
 }

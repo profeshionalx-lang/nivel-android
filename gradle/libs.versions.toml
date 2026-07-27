@@ -25,6 +25,7 @@ hiltWork = "1.2.0"
 googleServices = "4.4.2"
 firebaseBom = "33.0.0"
 tink = "1.23.0"
+camerax = "1.4.1"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -73,6 +74,13 @@ firebase-messaging-ktx = { group = "com.google.firebase", name = "firebase-messa
 
 # #72 — шифрование bearer-токена (AES256-GCM, ключ в Android Keystore).
 tink-android = { group = "com.google.crypto.tink", name = "tink-android", version.ref = "tink" }
+
+# A3 (#97) — видеозапись тренировки (без звука, штатив) через CameraX.
+androidx-camera-core = { group = "androidx.camera", name = "camera-core", version.ref = "camerax" }
+androidx-camera-camera2 = { group = "androidx.camera", name = "camera-camera2", version.ref = "camerax" }
+androidx-camera-lifecycle = { group = "androidx.camera", name = "camera-lifecycle", version.ref = "camerax" }
+androidx-camera-video = { group = "androidx.camera", name = "camera-video", version.ref = "camerax" }
+androidx-camera-view = { group = "androidx.camera", name = "camera-view", version.ref = "camerax" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

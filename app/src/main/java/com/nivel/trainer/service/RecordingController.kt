@@ -12,37 +12,57 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * Состояние фоновой записи (C1). Единый источник правды о том, идёт ли запись,
- * куда пишется файл и сколько уже записано. UI (экран записи C2) подписывается на
- * [RecordingController.state]; сервис [RecordingService] его обновляет.
+ * Режим записи (A3, #97), выбирается тренером **до** старта:
+ * - [AUDIO] — как раньше, телефон в кармане, экран может гаснуть, пишет `MediaRecorder`.
+ * - [VIDEO] — телефон на штативе, экран не гаснет, пишет CameraX `Recorder` БЕЗ звука
+ *   (звук в видео-режиме параллельным `MediaRecorder` добавит A4/#98, здесь его нет).
+ */
+enum class RecordingMode { AUDIO, VIDEO }
+
+/**
+ * Состояние записи (C1, расширено в A3/#97 режимом). Единый источник правды о том,
+ * идёт ли запись, в каком режиме, куда пишется файл и сколько уже записано. UI (экран
+ * записи C2) подписывается на [RecordingController.state]; для [RecordingMode.AUDIO]
+ * его обновляет сервис [RecordingService], для [RecordingMode.VIDEO] — экран записи
+ * напрямую (CameraX работает через превью на экране, не через foreground-сервис).
  */
 sealed interface RecordingState {
     /** Записи нет. */
     data object Idle : RecordingState
 
     /**
-     * Идёт запись, привязанная к сессии [sessionId]. Файл пишется в [outputPath].
-     * [startedElapsedRealtimeMs] — `SystemClock.elapsedRealtime()` на момент старта,
-     * по нему UI/уведомление считают длительность (монотонные часы, не зависят от
-     * перевода системного времени).
+     * Идёт запись, привязанная к сессии [sessionId]. Для [RecordingMode.AUDIO] файл
+     * пишется в [outputPath], для [RecordingMode.VIDEO] — в [videoPath] (второе поле
+     * у соответствующего режима не заполняется). [startedElapsedRealtimeMs] —
+     * `SystemClock.elapsedRealtime()` на момент старта, по нему UI/уведомление считают
+     * длительность (монотонные часы, не зависят от перевода системного времени).
      */
     data class Recording(
         val sessionId: String,
-        val outputPath: String,
         val startedElapsedRealtimeMs: Long,
+        val mode: RecordingMode = RecordingMode.AUDIO,
+        val outputPath: String? = null,
+        val videoPath: String? = null,
     ) : RecordingState
 
-    /** Запись завершена: готовый файл [outputPath] длительностью [durationMs] ждёт заливки (C3). */
+    /**
+     * Запись завершена длительностью [durationMs]. Аудио-файл [outputPath] ждёт
+     * заливки (C3); видео-файл [videoPath] остаётся только локально — на сервер
+     * видео не уезжает (см. эпик NIVEL#235), заливки для него нет.
+     */
     data class Finished(
         val sessionId: String,
-        val outputPath: String,
         val durationMs: Long,
+        val mode: RecordingMode = RecordingMode.AUDIO,
+        val outputPath: String? = null,
+        val videoPath: String? = null,
     ) : RecordingState
 
-    /** Ошибка записи (нет разрешения, занят микрофон, сбой кодека). */
+    /** Ошибка записи (нет разрешения, занят микрофон/камера, сбой кодека, мало места). */
     data class Error(
         val sessionId: String?,
         val message: String,
+        val mode: RecordingMode = RecordingMode.AUDIO,
     ) : RecordingState
 }
 
@@ -66,7 +86,7 @@ class RecordingController @Inject constructor(
     val state: StateFlow<RecordingState> = _state.asStateFlow()
 
     /**
-     * Запустить запись для сессии. Поднимает foreground-сервис (тип microphone).
+     * Запустить аудио-запись для сессии. Поднимает foreground-сервис (тип microphone).
      * Первичная защита: без разрешения на микрофон сервис не стартуем вовсе —
      * сразу фиксируем ошибку (экран записи C2 должен запросить разрешение заранее).
      */
@@ -83,14 +103,17 @@ class RecordingController @Inject constructor(
     }
 
     /**
-     * Остановить запись и завершить сервис. Файл остаётся на диске для заливки.
+     * Остановить аудио-запись и завершить сервис. Файл остаётся на диске для заливки.
      *
-     * Команду шлём только когда запись реально идёт: тогда сервис жив в foreground и
-     * `startService` гарантированно доставит интент. Иначе (записи нет) — не стартуем
-     * сервис в фоне: на Android 8+ запуск фонового сервиса из фона бросает исключение.
+     * Команду шлём только когда идёт именно аудио-запись: тогда сервис жив в foreground
+     * и `startService` гарантированно доставит интент. Иначе (записи нет, либо это
+     * видео-запись — ей владеет CameraX на экране записи, не сервис) команду не шлём:
+     * на Android 8+ запуск фонового сервиса из фона бросает исключение, а для видео
+     * стоп идёт напрямую через рекордер экрана (см. [RecorderScreen][com.nivel.trainer.feature.recorder.RecorderScreen]).
      */
     fun stop() {
-        if (_state.value !is RecordingState.Recording) return
+        val current = _state.value
+        if (current !is RecordingState.Recording || current.mode != RecordingMode.AUDIO) return
         val intent = Intent(context, RecordingService::class.java).apply {
             action = RecordingService.ACTION_STOP
         }
@@ -105,13 +128,17 @@ class RecordingController @Inject constructor(
         }
     }
 
-    /** Обновление состояния — только из сервиса (он владеет записью). */
+    /**
+     * Обновление состояния. Для [RecordingMode.AUDIO] его зовёт только сервис (он
+     * владеет `MediaRecorder`); для [RecordingMode.VIDEO] — экран записи (он владеет
+     * CameraX-рекордером через превью). `internal` — вызовы только внутри модуля.
+     */
     internal fun update(state: RecordingState) {
         _state.value = state
-        // Хэндофф запись → конвейер (C3): как только запись завершена, ставим
-        // заливку в очередь WorkManager. uniqueWork+KEEP защищает от дублей, если
-        // экран записи (C2) тоже инициирует заливку по «Стоп».
-        if (state is RecordingState.Finished) {
+        // Хэндофф запись → конвейер (C3): как только АУДИО-запись завершена, ставим
+        // заливку в очередь WorkManager. Видео на сервер не уезжает (эпик NIVEL#235,
+        // заливку получит только звук в A4) — для него заливку не ставим.
+        if (state is RecordingState.Finished && state.mode == RecordingMode.AUDIO && state.outputPath != null) {
             uploadScheduler.enqueue(sessionId = state.sessionId, filePath = state.outputPath)
         }
     }

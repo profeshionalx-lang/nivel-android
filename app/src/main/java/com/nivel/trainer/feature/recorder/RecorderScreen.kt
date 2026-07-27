@@ -1,11 +1,13 @@
 package com.nivel.trainer.feature.recorder
 
+import android.Manifest
 import android.content.Intent
 import android.net.Uri
 import android.os.SystemClock
 import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.camera.view.PreviewView
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -16,6 +18,7 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
@@ -30,6 +33,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
@@ -41,15 +45,23 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.nivel.trainer.service.RecordingMode
 import com.nivel.trainer.service.RecordingPermissions
 import com.nivel.trainer.service.RecordingState
+import com.nivel.trainer.service.video.VideoFileNaming
+import com.nivel.trainer.service.video.VideoFreeSpace
+import com.nivel.trainer.service.video.VideoRecorder
+import com.nivel.trainer.service.video.VideoRecordingResult
 import com.nivel.trainer.ui.theme.NivelTheme
 import kotlinx.coroutines.delay
 
@@ -68,18 +80,17 @@ private val RecDot = Color(0xFFFF3B30) // «идёт запись» индика
 private val TouchTarget = 48.dp
 
 /**
- * Экран записи тренировки (C2, #11).
+ * Экран записи тренировки (C2, #11; выбор режима — A3, #97).
  *
  * Нативный эквивалент веб-аплоадера (`components/sessions/AudioUploader`): тренер
- * не заливает файл, а записывает прямо в приложении. Запись привязана к выбранной
- * сессии [sessionId]; владеет ей process-wide
- * [RecordingController][com.nivel.trainer.service.RecordingController] через
- * foreground-сервис (C1), поэтому она переживает уход с экрана и лок (можно
- * остановить из уведомления в шторке).
- *
- * Поток: вход → запрос разрешений → старт → живой таймер + «Стоп» → по «Стоп»
- * запись завершается и уходит на заливку (хэндофф в контроллере, C3) → короткий
- * статус → авто-возврат на карточку (там появится «Транскрипция…»).
+ * не заливает файл, а записывает прямо в приложении. До старта тренер выбирает режим:
+ * «Аудио» (телефон в кармане, как раньше — [RecordingMode.AUDIO]) или «Видео» (телефон
+ * на штативе — [RecordingMode.VIDEO]). Запись привязана к выбранной сессии [sessionId];
+ * состоянием владеет process-wide
+ * [RecordingController][com.nivel.trainer.service.RecordingController] в обоих режимах,
+ * но механика разная: аудио идёт через foreground-сервис (C1) и переживает уход с
+ * экрана, видео — через CameraX прямо на этом экране (нужна превью-поверхность),
+ * поэтому сворачивание/звонок его останавливают (см. [VideoFlow]).
  */
 @Composable
 fun RecorderScreen(
@@ -88,11 +99,134 @@ fun RecorderScreen(
     modifier: Modifier = Modifier,
     viewModel: RecorderViewModel = hiltViewModel(),
 ) {
-    val context = LocalContext.current
     val state by viewModel.state.collectAsStateWithLifecycle()
 
+    // Режим выбирается один раз за вход на экран. Saveable, чтобы пережить поворот.
+    // Если экран переоткрыли во время активной/только что завершённой записи —
+    // подхватываем режим из состояния, а не спрашиваем заново.
+    var selectedModeName by rememberSaveable { mutableStateOf<String?>(null) }
+    LaunchedEffect(Unit) {
+        val modeFromState = when (val s = state) {
+            is RecordingState.Recording -> s.mode
+            is RecordingState.Finished -> s.mode
+            is RecordingState.Error -> s.mode
+            RecordingState.Idle -> null
+        }
+        if (selectedModeName == null && modeFromState != null) {
+            selectedModeName = modeFromState.name
+        }
+    }
+    val selectedMode = selectedModeName?.let { RecordingMode.valueOf(it) }
+
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .background(Background),
+    ) {
+        Header(onBack = onClose)
+
+        Box(modifier = Modifier.fillMaxSize()) {
+            when (selectedMode) {
+                null -> Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = 28.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    ModeSelectContent(onSelect = { selectedModeName = it.name })
+                }
+
+                RecordingMode.AUDIO -> AudioFlow(
+                    sessionId = sessionId,
+                    state = state,
+                    viewModel = viewModel,
+                    onClose = onClose,
+                )
+
+                RecordingMode.VIDEO -> VideoFlow(
+                    sessionId = sessionId,
+                    state = state,
+                    viewModel = viewModel,
+                    onClose = onClose,
+                )
+            }
+        }
+    }
+}
+
+/** Выбор режима до старта записи (A3, #97). Аудио — как раньше, видео — новый режим. */
+@Composable
+private fun ModeSelectContent(onSelect: (RecordingMode) -> Unit) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(20.dp),
+    ) {
+        Text(
+            text = "Как записываем?",
+            color = OnSurface,
+            fontSize = 20.sp,
+            fontWeight = FontWeight.Black,
+            textAlign = TextAlign.Center,
+        )
+        ModeOptionCard(
+            glyph = "🎙",
+            title = "Аудио",
+            subtitle = "Телефон в кармане. Экран можно заблокировать.",
+            onClick = { onSelect(RecordingMode.AUDIO) },
+        )
+        ModeOptionCard(
+            glyph = "🎥",
+            title = "Видео",
+            subtitle = "Телефон на штативе. Экран не гаснет во время записи.",
+            onClick = { onSelect(RecordingMode.VIDEO) },
+        )
+    }
+}
+
+@Composable
+private fun ModeOptionCard(
+    glyph: String,
+    title: String,
+    subtitle: String,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 76.dp)
+            .background(SurfaceCard, RoundedCornerShape(16.dp))
+            .padding(horizontal = 18.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(glyph, fontSize = 30.sp)
+        Spacer(Modifier.width(14.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(title, color = OnSurface, fontSize = 16.sp, fontWeight = FontWeight.Black)
+            Text(subtitle, color = OnSurfaceVariant, fontSize = 12.sp)
+        }
+        Button(
+            onClick = onClick,
+            modifier = Modifier.heightIn(min = TouchTarget),
+            shape = RoundedCornerShape(12.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = Primary, contentColor = OnPrimary),
+        ) {
+            Text("Выбрать", fontSize = 13.sp, fontWeight = FontWeight.Black)
+        }
+    }
+}
+
+// --- Аудио-режим (C1/C2, поведение не изменилось — только вынесено в отдельную функцию) ---
+
+@Composable
+private fun AudioFlow(
+    sessionId: String,
+    state: RecordingState,
+    viewModel: RecorderViewModel,
+    onClose: () -> Unit,
+) {
+    val context = LocalContext.current
+
     // Отказ в разрешении на микрофон — показываем объяснение вместо записи.
-    // Saveable, чтобы после поворота экрана не дёргать системный диалог повторно.
     var micDenied by rememberSaveable { mutableStateOf(false) }
 
     val permissionLauncher = rememberLauncherForActivityResult(
@@ -100,7 +234,7 @@ fun RecorderScreen(
     ) { result ->
         // POST_NOTIFICATIONS (13+) не критичен: без него запись идёт, но без уведомления.
         // Критичен только микрофон — без него на Android 14+ FGS-microphone не стартует.
-        val micGranted = result[android.Manifest.permission.RECORD_AUDIO] == true
+        val micGranted = result[Manifest.permission.RECORD_AUDIO] == true
         if (micGranted) {
             micDenied = false
             viewModel.start(sessionId)
@@ -128,7 +262,6 @@ fun RecorderScreen(
     }
 
     // По завершении записи: короткий статус, затем сброс и возврат на карточку.
-    // Ключ — факт завершения (а не весь объект), чтобы не перезапускаться на иных апдейтах.
     val finished = state is RecordingState.Finished
     LaunchedEffect(finished) {
         if (finished) {
@@ -138,59 +271,330 @@ fun RecorderScreen(
         }
     }
 
-    Column(
-        modifier = modifier
+    Box(
+        modifier = Modifier
             .fillMaxSize()
-            .background(Background),
+            .padding(horizontal = 28.dp),
+        contentAlignment = Alignment.Center,
     ) {
-        Header(onBack = onClose)
+        when (val s = state) {
+            is RecordingState.Recording -> RecordingContent(
+                recording = s,
+                onStop = viewModel::stop,
+            )
 
+            is RecordingState.Finished -> StatusContent(
+                glyph = "✓",
+                glyphColor = Primary,
+                title = "Запись сохранена",
+                subtitle = "Транскрипция запущена — обычно занимает 15–30 секунд.",
+            )
+
+            is RecordingState.Error -> ErrorContent(
+                message = s.message,
+                onRetry = {
+                    viewModel.acknowledge()
+                    if (RecordingPermissions.hasMicPermission(context)) {
+                        viewModel.start(sessionId)
+                    } else {
+                        permissionLauncher.launch(RecordingPermissions.required)
+                    }
+                },
+                onBack = onClose,
+            )
+
+            RecordingState.Idle ->
+                if (micDenied) {
+                    PermissionDeniedContent(
+                        glyph = "🎙",
+                        title = "Нужен доступ к микрофону",
+                        message = "Без него записать тренировку не получится. Разрешите доступ к микрофону.",
+                        onGrant = { permissionLauncher.launch(RecordingPermissions.required) },
+                        onOpenSettings = { context.openAppSettings() },
+                    )
+                } else {
+                    // Кратковременно: разрешение выдаётся / запись поднимается.
+                    CircularProgressIndicator(color = Primary)
+                }
+        }
+    }
+}
+
+// --- Видео-режим (A3, #97) ---
+
+/**
+ * Видео-flow: разрешение на камеру → превью со штатива → проверка места →
+ * «Начать запись» → таймер поверх превью → «Стоп» → готово.
+ *
+ * [VideoRecorder] и `PreviewView` держим на протяжении ВСЕЙ функции (один `remember`),
+ * а не пересоздаём между стадиями «до старта»/«идёт запись» — иначе при каждом тапе
+ * «Начать запись» камера будет перепривязываться с видимым миганием превью.
+ */
+@Composable
+private fun VideoFlow(
+    sessionId: String,
+    state: RecordingState,
+    viewModel: RecorderViewModel,
+    onClose: () -> Unit,
+) {
+    val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+
+    var cameraDenied by rememberSaveable { mutableStateOf(false) }
+    val cameraPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        cameraDenied = !granted
+    }
+    val hasCamera = RecordingPermissions.hasCameraPermission(context)
+
+    LaunchedEffect(Unit) {
+        if (state is RecordingState.Finished || state is RecordingState.Error) {
+            viewModel.acknowledge()
+        }
+        if (!hasCamera && !cameraDenied) {
+            cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+        }
+    }
+
+    if (!hasCamera) {
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(horizontal = 28.dp),
             contentAlignment = Alignment.Center,
         ) {
-            when (val s = state) {
-                is RecordingState.Recording -> RecordingContent(
-                    recording = s,
-                    onStop = viewModel::stop,
+            if (cameraDenied) {
+                PermissionDeniedContent(
+                    glyph = "🎥",
+                    title = "Нужен доступ к камере",
+                    message = "Без него снять видео не получится. Разрешите доступ к камере.",
+                    onGrant = { cameraPermissionLauncher.launch(Manifest.permission.CAMERA) },
+                    onOpenSettings = { context.openAppSettings() },
                 )
+            } else {
+                CircularProgressIndicator(color = Primary)
+            }
+        }
+        return
+    }
 
-                is RecordingState.Finished -> StatusContent(
+    // Экран не гаснет весь видео-flow (кадрирование + запись) — телефон на штативе,
+    // тренеру важно, чтобы превью/таймер не пропали посреди тренировки.
+    val view = LocalView.current
+    DisposableEffect(Unit) {
+        view.keepScreenOn = true
+        onDispose { view.keepScreenOn = false }
+    }
+
+    val videoRecorder = remember { VideoRecorder(context.applicationContext) }
+    val previewView = remember { PreviewView(context) }
+    DisposableEffect(Unit) {
+        onDispose { videoRecorder.release() }
+    }
+    LaunchedEffect(previewView) {
+        videoRecorder.bind(previewView, lifecycleOwner)
+    }
+
+    // По завершении записи: короткий статус, затем сброс и возврат на карточку.
+    val finished = state is RecordingState.Finished && state.mode == RecordingMode.VIDEO
+    LaunchedEffect(finished) {
+        if (finished) {
+            delay(1_400)
+            viewModel.acknowledge()
+            onClose()
+        }
+    }
+
+    when (val s = state) {
+        is RecordingState.Recording -> if (s.mode == RecordingMode.VIDEO) {
+            Box(modifier = Modifier.fillMaxSize()) {
+                AndroidView(factory = { previewView }, modifier = Modifier.fillMaxSize())
+                VideoRecordingOverlay(recording = s, onStop = { videoRecorder.stop() })
+            }
+        } else {
+            // Чужой (аудио) Recording в этой ветке не встречается — режим фиксирован
+            // на входе, но на всякий случай не рисуем ничего конфликтующего.
+        }
+
+        is RecordingState.Finished -> if (s.mode == RecordingMode.VIDEO) {
+            Box(
+                modifier = Modifier.fillMaxSize().padding(horizontal = 28.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                StatusContent(
                     glyph = "✓",
                     glyphColor = Primary,
-                    title = "Запись сохранена",
-                    subtitle = "Транскрипция запущена — обычно занимает 15–30 секунд.",
+                    title = "Видео сохранено",
+                    subtitle = "Файл остался на телефоне — пригодится для разбора моментов.",
                 )
+            }
+        }
 
-                is RecordingState.Error -> ErrorContent(
-                    message = s.message,
-                    onRetry = {
-                        viewModel.acknowledge()
-                        if (RecordingPermissions.hasMicPermission(context)) {
-                            viewModel.start(sessionId)
-                        } else {
-                            permissionLauncher.launch(RecordingPermissions.required)
+        is RecordingState.Error -> if (s.mode == RecordingMode.VIDEO) {
+            Box(
+                modifier = Modifier.fillMaxSize().padding(horizontal = 28.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                ErrorContent(message = s.message, onRetry = { viewModel.acknowledge() }, onBack = onClose)
+            }
+        }
+
+        RecordingState.Idle -> Box(modifier = Modifier.fillMaxSize()) {
+            AndroidView(factory = { previewView }, modifier = Modifier.fillMaxSize())
+            VideoPreStartOverlay(
+                onStart = {
+                    val file = VideoFileNaming.file(context, sessionId)
+                    val startedAt = SystemClock.elapsedRealtime()
+                    viewModel.onVideoStarted(sessionId, file)
+                    videoRecorder.start(file) { result ->
+                        when (result) {
+                            is VideoRecordingResult.Success -> viewModel.onVideoFinished(
+                                sessionId = sessionId,
+                                videoFile = result.file,
+                                durationMs = SystemClock.elapsedRealtime() - startedAt,
+                            )
+
+                            is VideoRecordingResult.Failure -> viewModel.onVideoError(sessionId, result.message)
                         }
-                    },
-                    onBack = onClose,
-                )
-
-                RecordingState.Idle ->
-                    if (micDenied) {
-                        PermissionDeniedContent(
-                            onGrant = { permissionLauncher.launch(RecordingPermissions.required) },
-                            onOpenSettings = { context.openAppSettings() },
-                        )
-                    } else {
-                        // Кратковременно: разрешение выдаётся / запись поднимается.
-                        CircularProgressIndicator(color = Primary)
                     }
+                },
+            )
+        }
+    }
+}
+
+/** Превью-стадия видео: проверка места + крупная кнопка «Начать запись». */
+@Composable
+private fun VideoPreStartOverlay(onStart: () -> Unit) {
+    val context = LocalContext.current
+    val estimatedMinutes = remember { VideoFreeSpace.estimatedMinutesRemaining(context) }
+    var forceStart by rememberSaveable { mutableStateOf(false) }
+    val lowSpace = estimatedMinutes < VideoFreeSpace.LOW_SPACE_WARNING_MINUTES
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .windowInsetsPadding(WindowInsets.navigationBars)
+            .padding(horizontal = 20.dp, vertical = 16.dp),
+        verticalArrangement = Arrangement.Bottom,
+    ) {
+        if (lowSpace && !forceStart) {
+            LowSpaceWarningCard(
+                estimatedMinutes = estimatedMinutes,
+                onContinueAnyway = { forceStart = true },
+            )
+        } else {
+            Text(
+                text = if (estimatedMinutes >= 60) {
+                    "Свободного места хватит примерно на ${estimatedMinutes / 60} ч. Поставьте телефон на зарядку для длинной тренировки."
+                } else {
+                    "Свободного места хватит примерно на $estimatedMinutes мин."
+                },
+                color = OnSurfaceVariant,
+                fontSize = 12.sp,
+                textAlign = TextAlign.Center,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(SurfaceCard, RoundedCornerShape(12.dp))
+                    .padding(horizontal = 14.dp, vertical = 10.dp),
+            )
+            Spacer(Modifier.width(12.dp))
+            Button(
+                onClick = onStart,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 56.dp)
+                    .padding(top = 12.dp),
+                shape = RoundedCornerShape(16.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = Primary, contentColor = OnPrimary),
+            ) {
+                Text("Начать запись", fontSize = 16.sp, fontWeight = FontWeight.Black)
             }
         }
     }
 }
+
+/** Предупреждение о нехватке места (A3, #97) — блокирует старт, но не приложение. */
+@Composable
+private fun LowSpaceWarningCard(estimatedMinutes: Int, onContinueAnyway: () -> Unit) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(SurfaceCard, RoundedCornerShape(16.dp))
+            .padding(18.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Text("⚠ Мало места", color = ErrorColor, fontSize = 15.sp, fontWeight = FontWeight.Black)
+        Text(
+            text = "Свободного места хватит примерно на $estimatedMinutes мин видео. " +
+                "Освободите место или снимите короче — иначе запись может прерваться.",
+            color = OnSurfaceVariant,
+            fontSize = 13.sp,
+        )
+        Button(
+            onClick = onContinueAnyway,
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = TouchTarget),
+            shape = RoundedCornerShape(12.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = Primary, contentColor = OnPrimary),
+        ) {
+            Text("Всё равно записывать", fontSize = 14.sp, fontWeight = FontWeight.Black)
+        }
+    }
+}
+
+/** Активная видеозапись: таймер + «Стоп» поверх превью камеры. */
+@Composable
+private fun VideoRecordingOverlay(recording: RecordingState.Recording, onStop: () -> Unit) {
+    var nowMs by remember { mutableLongStateOf(SystemClock.elapsedRealtime()) }
+    LaunchedEffect(recording.startedElapsedRealtimeMs) {
+        while (true) {
+            nowMs = SystemClock.elapsedRealtime()
+            delay(250)
+        }
+    }
+    val elapsedMs = (nowMs - recording.startedElapsedRealtimeMs).coerceAtLeast(0)
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .windowInsetsPadding(WindowInsets.navigationBars)
+            .padding(horizontal = 20.dp, vertical = 16.dp),
+        verticalArrangement = Arrangement.Bottom,
+    ) {
+        Row(
+            modifier = Modifier
+                .align(Alignment.CenterHorizontally)
+                .background(SurfaceCard, RoundedCornerShape(999.dp))
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(modifier = Modifier.size(10.dp).background(RecDot, CircleShape))
+            Spacer(Modifier.width(8.dp))
+            Text(
+                text = "REC ${formatDuration(elapsedMs)}",
+                color = OnSurface,
+                fontSize = 15.sp,
+                fontWeight = FontWeight.Black,
+            )
+        }
+        Button(
+            onClick = onStop,
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = 56.dp)
+                .padding(top = 16.dp),
+            shape = RoundedCornerShape(16.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = Primary, contentColor = OnPrimary),
+        ) {
+            Text("Стоп", fontSize = 16.sp, fontWeight = FontWeight.Black)
+        }
+    }
+}
+
+// --- Общие блоки ---
 
 /** Хедер как на остальных экранах: «‹» назад + центрированный заголовок «Запись». */
 @Composable
@@ -218,7 +622,7 @@ private fun Header(onBack: () -> Unit) {
     }
 }
 
-/** Активная запись: «идёт запись» + живой таймер + крупная кнопка «Стоп». */
+/** Активная запись: «идёт запись» + живой таймер + крупная кнопка «Стоп» (аудио). */
 @Composable
 private fun RecordingContent(
     recording: RecordingState.Recording,
@@ -285,9 +689,12 @@ private fun RecordingContent(
     }
 }
 
-/** Объяснение при отказе в доступе к микрофону + пути выдачи. */
+/** Объяснение при отказе в доступе к микрофону/камере + пути выдачи. */
 @Composable
 private fun PermissionDeniedContent(
+    glyph: String,
+    title: String,
+    message: String,
     onGrant: () -> Unit,
     onOpenSettings: () -> Unit,
 ) {
@@ -295,16 +702,16 @@ private fun PermissionDeniedContent(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        Text("🎙", fontSize = 44.sp)
+        Text(glyph, fontSize = 44.sp)
         Text(
-            text = "Нужен доступ к микрофону",
+            text = title,
             color = OnSurface,
             fontSize = 18.sp,
             fontWeight = FontWeight.Black,
             textAlign = TextAlign.Center,
         )
         Text(
-            text = "Без него записать тренировку не получится. Разрешите доступ к микрофону.",
+            text = message,
             color = OnSurfaceVariant,
             fontSize = 14.sp,
             textAlign = TextAlign.Center,
@@ -450,8 +857,9 @@ private fun RecordingPreview() {
             RecordingContent(
                 recording = RecordingState.Recording(
                     sessionId = "s1",
-                    outputPath = "/tmp/a.m4a",
                     startedElapsedRealtimeMs = SystemClock.elapsedRealtime() - 125_000,
+                    mode = RecordingMode.AUDIO,
+                    outputPath = "/tmp/a.m4a",
                 ),
                 onStop = {},
             )
@@ -469,7 +877,28 @@ private fun PermissionDeniedPreview() {
                 .padding(28.dp),
             contentAlignment = Alignment.Center,
         ) {
-            PermissionDeniedContent(onGrant = {}, onOpenSettings = {})
+            PermissionDeniedContent(
+                glyph = "🎙",
+                title = "Нужен доступ к микрофону",
+                message = "Без него записать тренировку не получится. Разрешите доступ к микрофону.",
+                onGrant = {},
+                onOpenSettings = {},
+            )
+        }
+    }
+}
+
+@Preview(showBackground = true, backgroundColor = 0xFF0E0E0E)
+@Composable
+private fun ModeSelectPreview() {
+    NivelTheme {
+        Box(
+            modifier = Modifier
+                .background(Background)
+                .padding(28.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            ModeSelectContent(onSelect = {})
         }
     }
 }

@@ -13,6 +13,11 @@
     <!-- Показ уведомления записи/заливки на Android 13+ (рантайм-разрешение). -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
+    <!-- A3 (#97): видеозапись тренировки (штатив) через CameraX. Камера не обязательна
+         для установки приложения (аудио-режим работает и без неё) — required="false". -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera.any" android:required="false" />
+
     <application
         android:name=".NivelApp"
         android:allowBackup="true"

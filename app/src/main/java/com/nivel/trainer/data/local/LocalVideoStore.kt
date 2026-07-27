@@ -68,7 +68,7 @@ class LocalVideoStore @Inject constructor(
         decode(dataStore.data.first()[keyFor(sessionId)]) ?: recoverFromDisk(sessionId)
 
     suspend fun put(record: VideoRecord) {
-        dataStore.edit { it[keyFor(record.sessionId)] = json.encodeToString(record) }
+        dataStore.edit { it[keyFor(record.sessionId)] = json.encodeToString(VideoRecord.serializer(), record) }
     }
 
     /** Удаление записи — вызывается из «Завершить разбор» (A9), здесь только API. */

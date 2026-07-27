@@ -416,7 +416,17 @@ private fun VideoFlow(
         is RecordingState.Recording -> if (s.mode == RecordingMode.VIDEO) {
             Box(modifier = Modifier.fillMaxSize()) {
                 AndroidView(factory = { previewView }, modifier = Modifier.fillMaxSize())
-                VideoRecordingOverlay(recording = s, onStop = { videoRecorder.stop() })
+                VideoRecordingOverlay(
+                    recording = s,
+                    onStop = {
+                        // Останавливаем оба рекордера почти одновременно: CameraX — сама
+                        // финализация видео придёт в onVideoFinished асинхронно; звук —
+                        // сразу же, иначе MediaRecorder продолжит писать после «Стоп»
+                        // (ACTION_STOP идёт в RecordingService, который его и держит).
+                        videoRecorder.stop()
+                        viewModel.stopVideoAudioSidecar()
+                    },
+                )
             }
         } else {
             // Чужой (аудио) Recording в этой ветке не встречается — режим фиксирован

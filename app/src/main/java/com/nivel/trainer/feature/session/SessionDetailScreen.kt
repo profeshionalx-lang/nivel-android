@@ -19,6 +19,7 @@ import com.nivel.trainer.domain.SessionOverview
 import com.nivel.trainer.feature.session.components.Background
 import com.nivel.trainer.feature.session.components.CenterBox
 import com.nivel.trainer.feature.session.components.CompleteReviewErrorBanner
+import com.nivel.trainer.feature.session.components.EditCardSheet
 import com.nivel.trainer.feature.session.components.EmptyState
 import com.nivel.trainer.feature.session.components.ErrorState
 import com.nivel.trainer.feature.session.components.Header
@@ -94,6 +95,7 @@ fun SessionDetailScreen(
         completeReviewError = state.completeReviewError,
         reorderedCards = state.reorderedCards,
         isOffline = state.isOffline,
+        cardActionError = state.cardActionError,
         onGenerate = viewModel::generateInsights,
         onOpenPaste = viewModel::openPasteSheet,
         onOpenLibrary = viewModel::openLibrarySheet,
@@ -101,6 +103,10 @@ fun SessionDetailScreen(
         onDismissCompleteReviewError = viewModel::dismissCompleteReviewError,
         onMoveCard = viewModel::moveCard,
         onCardDragEnd = viewModel::commitCardReorder,
+        onApproveCard = viewModel::approveCard,
+        onRejectCard = viewModel::rejectCard,
+        onEditCard = viewModel::openEditSheet,
+        onDismissCardActionError = viewModel::dismissCardActionError,
         onBack = onBack,
         onRecord = onRecord,
         onRetry = viewModel::refresh,
@@ -128,6 +134,20 @@ fun SessionDetailScreen(
             onDismiss = viewModel::dismissLibrarySheet,
         )
     }
+
+    // A2 (#96) — bottom-sheet правки draft/approved-карточки.
+    val editSheet = state.editSheet
+    if (editSheet is EditSheetState.Open) {
+        EditCardSheet(
+            state = editSheet,
+            onTitleChange = viewModel::onEditTitleChange,
+            onBodyChange = viewModel::onEditBodyChange,
+            onTagChange = viewModel::onEditTagChange,
+            onSideChange = viewModel::onEditSideChange,
+            onSave = viewModel::submitEdit,
+            onDismiss = viewModel::closeEditSheet,
+        )
+    }
 }
 
 /** Период поллинга статуса авто-анализа (как `setInterval(3000)` в вебе). */
@@ -150,6 +170,7 @@ internal fun SessionDetailContent(
     completeReviewError: String? = null,
     reorderedCards: List<com.nivel.trainer.domain.InsightCard>? = null,
     isOffline: Boolean = false,
+    cardActionError: String? = null,
     onGenerate: () -> Unit = {},
     onOpenPaste: () -> Unit = {},
     onOpenLibrary: () -> Unit = {},
@@ -159,6 +180,10 @@ internal fun SessionDetailContent(
     onDismissCompleteReviewError: () -> Unit = {},
     onMoveCard: (fromIndex: Int, toIndex: Int) -> Unit = { _, _ -> },
     onCardDragEnd: () -> Unit = {},
+    onApproveCard: (String) -> Unit = {},
+    onRejectCard: (String) -> Unit = {},
+    onEditCard: (com.nivel.trainer.domain.InsightCard) -> Unit = {},
+    onDismissCardActionError: () -> Unit = {},
 ) {
     Column(
         modifier = modifier
@@ -209,6 +234,9 @@ internal fun SessionDetailContent(
                     onCompleteReview = onCompleteReview,
                     onMoveCard = onMoveCard,
                     onCardDragEnd = onCardDragEnd,
+                    onApproveCard = onApproveCard,
+                    onRejectCard = onRejectCard,
+                    onEditCard = onEditCard,
                 )
 
                 else -> CenterBox { EmptyState() }
@@ -221,6 +249,14 @@ internal fun SessionDetailContent(
         CompleteReviewErrorBanner(
             message = completeReviewError,
             onDismiss = onDismissCompleteReviewError,
+        )
+    }
+
+    // A2 (#96) — ошибка approve/reject/edit черновика (баннер, тот же паттерн что D5).
+    if (cardActionError != null) {
+        CompleteReviewErrorBanner(
+            message = cardActionError,
+            onDismiss = onDismissCardActionError,
         )
     }
 }

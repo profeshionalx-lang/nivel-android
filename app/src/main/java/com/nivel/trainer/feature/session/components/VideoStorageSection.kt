@@ -87,7 +87,11 @@ internal fun VideoStorageSection(
                     }
                 }
             }
-            TextButton(onClick = onDelete, enabled = !state.deleting) {
+            TextButton(
+                onClick = onDelete,
+                enabled = !state.deleting,
+                modifier = Modifier.heightIn(min = TouchTarget),
+            ) {
                 Text(
                     text = if (state.deleting) "Удаляем…" else "Удалить",
                     color = ErrorColor,

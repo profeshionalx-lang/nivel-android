@@ -17,7 +17,9 @@ import androidx.camera.view.PreviewView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.LifecycleOwner
 import java.io.File
+import java.util.Locale
 import kotlin.coroutines.resume
+import kotlin.math.roundToInt
 import kotlinx.coroutines.suspendCancellableCoroutine
 
 /**
@@ -55,6 +57,23 @@ object VideoFreeSpace {
         val freeBytes = stat.availableBytes
         val freeMb = freeBytes / (1024 * 1024)
         return (freeMb / ESTIMATED_MB_PER_MINUTE).toInt()
+    }
+}
+
+/**
+ * Человекочитаемый размер видеофайла (A9, #103) — индикатор занятого места на экране
+ * сессии и текст предупреждения перед удалением («Видео тренировки (N ГБ)…»).
+ */
+object VideoFileSize {
+    private const val MB = 1024.0 * 1024.0
+    private const val GB = 1024.0 * MB
+
+    /** «1,3 ГБ» для файлов от гигабайта, «180 МБ» для файлов меньше. */
+    fun format(bytes: Long): String {
+        val gb = bytes / GB
+        if (gb >= 1.0) return String.format(Locale("ru", "RU"), "%.1f ГБ", gb)
+        val mb = (bytes / MB).roundToInt().coerceAtLeast(1)
+        return "$mb МБ"
     }
 }
 

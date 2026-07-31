@@ -76,6 +76,18 @@ class LocalVideoStore @Inject constructor(
         dataStore.edit { it.remove(keyFor(sessionId)) }
     }
 
+    /**
+     * Стирает локальный `.mp4` и запись о нём (A9, #103) — единственный путь избавиться
+     * от видео: после подтверждённого сервером «Завершить разбор» либо вручную с экрана
+     * сессии. Файл удаляем первым: если его уже нет (гонка, ручное удаление руками) —
+     * не страшно, [File.delete] просто вернёт false, а запись в DataStore всё равно
+     * очистим, чтобы индикатор занятого места не показывал висящую ссылку.
+     */
+    suspend fun deleteVideo(sessionId: String) {
+        get(sessionId)?.let { record -> runCatching { File(record.videoPath).delete() } }
+        remove(sessionId)
+    }
+
     private fun decode(raw: String?): VideoRecord? =
         raw?.let { runCatching { json.decodeFromString<VideoRecord>(it) }.getOrNull() }
 

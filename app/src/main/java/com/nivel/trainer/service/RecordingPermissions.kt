@@ -7,15 +7,15 @@ import android.os.Build
 import androidx.core.content.ContextCompat
 
 /**
- * Разрешения, нужные записи (C1, режимы — A3/#97). Здесь — единый список и проверки;
- * сам системный запрос (launcher) делает экран записи (C2), используя [required]
- * (аудио, как раньше) или [requiredForVideo] (видео).
+ * Разрешения, нужные записи (C1, режимы — A3/#97, звук видео-режима — A4/#98). Здесь —
+ * единый список и проверки; сам системный запрос (launcher) делает экран записи (C2),
+ * используя [required] (аудио) или [requiredForVideo] (видео).
  *
- * - `RECORD_AUDIO` — рантайм-разрешение для аудио-режима, без него запись не стартует.
- * - `CAMERA` — рантайм-разрешение для видео-режима; аудио-режим его не спрашивает —
- *   поведение аудио-записи в A3 не меняется ни в чём.
- * - `POST_NOTIFICATIONS` — рантайм только на Android 13+ (уведомление аудио-записи;
- *   видео-режим уведомление не показывает — экран не гаснет, запись не фоновая).
+ * - `RECORD_AUDIO` — рантайм-разрешение нужно ОБОИМ режимам: аудио-режиму — как
+ *   раньше, видео-режиму — с A4 тоже, для параллельного `MediaRecorder` (звук).
+ * - `CAMERA` — рантайм-разрешение для видео-режима; аудио-режим его не спрашивает.
+ * - `POST_NOTIFICATIONS` — рантайм только на Android 13+; нужен обоим режимам — видео
+ *   тоже поднимает foreground-сервис для звука (A4) со своим уведомлением.
  * - `FOREGROUND_SERVICE*` — install-time, спрашивать не нужно (только в манифесте).
  */
 object RecordingPermissions {
@@ -29,9 +29,18 @@ object RecordingPermissions {
             }
         }.toTypedArray()
 
-    /** Разрешения для видео-режима: только камера (звук в видео A3 не пишем). */
+    /**
+     * Разрешения для видео-режима: камера (кадр) + микрофон (A4, #98 — параллельный
+     * `MediaRecorder` звука) + уведомления 13+ (тот же foreground-сервис звука).
+     */
     val requiredForVideo: Array<String>
-        get() = arrayOf(Manifest.permission.CAMERA)
+        get() = buildList {
+            add(Manifest.permission.CAMERA)
+            add(Manifest.permission.RECORD_AUDIO)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                add(Manifest.permission.POST_NOTIFICATIONS)
+            }
+        }.toTypedArray()
 
     /** Есть ли разрешение на запись звука (минимум для старта аудио-записи). */
     fun hasMicPermission(context: Context): Boolean =

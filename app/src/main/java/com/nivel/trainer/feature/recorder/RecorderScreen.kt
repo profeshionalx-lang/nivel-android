@@ -340,36 +340,42 @@ private fun VideoFlow(
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
 
-    var cameraDenied by rememberSaveable { mutableStateOf(false) }
-    val cameraPermissionLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission(),
-    ) { granted ->
-        cameraDenied = !granted
+    // Видео-режиму (A4, #98) нужны и камера (кадр), и микрофон (параллельный
+    // MediaRecorder звука) — запрашиваем оба разом одним лаунчером.
+    var permissionsDenied by rememberSaveable { mutableStateOf(false) }
+    val permissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions(),
+    ) { result ->
+        val cameraGranted = result[Manifest.permission.CAMERA] == true
+        val micGranted = result[Manifest.permission.RECORD_AUDIO] == true
+        permissionsDenied = !(cameraGranted && micGranted)
     }
     val hasCamera = RecordingPermissions.hasCameraPermission(context)
+    val hasMic = RecordingPermissions.hasMicPermission(context)
+    val hasAllPermissions = hasCamera && hasMic
 
     LaunchedEffect(Unit) {
         if (state is RecordingState.Finished || state is RecordingState.Error) {
             viewModel.acknowledge()
         }
-        if (!hasCamera && !cameraDenied) {
-            cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+        if (!hasAllPermissions && !permissionsDenied) {
+            permissionLauncher.launch(RecordingPermissions.requiredForVideo)
         }
     }
 
-    if (!hasCamera) {
+    if (!hasAllPermissions) {
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(horizontal = 28.dp),
             contentAlignment = Alignment.Center,
         ) {
-            if (cameraDenied) {
+            if (permissionsDenied) {
                 PermissionDeniedContent(
                     glyph = "🎥",
-                    title = "Нужен доступ к камере",
-                    message = "Без него снять видео не получится. Разрешите доступ к камере.",
-                    onGrant = { cameraPermissionLauncher.launch(Manifest.permission.CAMERA) },
+                    title = "Нужен доступ к камере и микрофону",
+                    message = "Без них снять видео со звуком не получится. Разрешите доступ к камере и микрофону.",
+                    onGrant = { permissionLauncher.launch(RecordingPermissions.requiredForVideo) },
                     onOpenSettings = { context.openAppSettings() },
                 )
             } else {
@@ -410,7 +416,17 @@ private fun VideoFlow(
         is RecordingState.Recording -> if (s.mode == RecordingMode.VIDEO) {
             Box(modifier = Modifier.fillMaxSize()) {
                 AndroidView(factory = { previewView }, modifier = Modifier.fillMaxSize())
-                VideoRecordingOverlay(recording = s, onStop = { videoRecorder.stop() })
+                VideoRecordingOverlay(
+                    recording = s,
+                    onStop = {
+                        // Останавливаем оба рекордера почти одновременно: CameraX — сама
+                        // финализация видео придёт в onVideoFinished асинхронно; звук —
+                        // сразу же, иначе MediaRecorder продолжит писать после «Стоп»
+                        // (ACTION_STOP идёт в RecordingService, который его и держит).
+                        videoRecorder.stop()
+                        viewModel.stopVideoAudioSidecar()
+                    },
+                )
             }
         } else {
             // Чужой (аудио) Recording в этой ветке не встречается — режим фиксирован

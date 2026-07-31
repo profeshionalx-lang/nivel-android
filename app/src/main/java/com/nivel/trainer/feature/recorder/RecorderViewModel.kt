@@ -11,21 +11,23 @@ import kotlinx.coroutines.flow.StateFlow
 import javax.inject.Inject
 
 /**
- * ViewModel экрана записи (C2, #11; режимы — A3/#97) — тонкая обёртка над
- * process-wide [RecordingController]. Сам контроллер `@Singleton` и владеет
- * состоянием записи, поэтому ViewModel ничего не дублирует: только прокидывает
- * [state] в UI и переводит команды экрана в вызовы контроллера.
+ * ViewModel экрана записи (C2, #11; режимы — A3/#97; звук видео-режима — A4/#98) —
+ * тонкая обёртка над process-wide [RecordingController]. Сам контроллер `@Singleton`
+ * и владеет состоянием записи, поэтому ViewModel ничего не дублирует: только
+ * прокидывает [state] в UI и переводит команды экрана в вызовы контроллера.
  *
  * Для [RecordingMode.AUDIO] запись ведёт [RecordingService][com.nivel.trainer.service.RecordingService]
- * (интенты через [start]/[stop]). Для [RecordingMode.VIDEO] запись ведёт CameraX
+ * (интенты через [start]/[stop]). Для [RecordingMode.VIDEO] видео ведёт CameraX
  * прямо на экране (нужна превью-поверхность) — сюда экран репортит её события
- * ([onVideoStarted]/[onVideoFinished]/[onVideoError]), а ViewModel лишь прокладывает
- * их в контроллер, чтобы состояние оставалось единым источником правды.
+ * ([onVideoStarted]/[onVideoFinished]/[onVideoError]); звук (A4, вариант B) —
+ * параллельный `MediaRecorder` в том же [RecordingService], который [onVideoStarted]
+ * запускает сразу вслед за CameraX, а [stopVideoAudioSidecar] — останавливает. Мёрж
+ * видео- и аудио-половинок в единый [RecordingState.Finished] делает сам контроллер.
  *
- * Хэндофф «запись → заливка» здесь НЕ делаем — он уже встроен в
- * [RecordingController.update]: при [RecordingState.Finished] аудио-записи контроллер
- * сам ставит заливку в очередь WorkManager (C3). Видео на сервер не уезжает (эпик
- * NIVEL#235) — для него заливки нет вовсе.
+ * Хэндофф «запись → заливка» здесь НЕ делаем — он уже встроен в контроллер: при
+ * завершении аудио-записи (или аудио-сайдкара видео-режима) он сам ставит заливку в
+ * очередь WorkManager (C3). Видео на сервер не уезжает (эпик NIVEL#235) — для него
+ * заливки нет вовсе.
  */
 @HiltViewModel
 class RecorderViewModel @Inject constructor(
@@ -44,32 +46,26 @@ class RecorderViewModel @Inject constructor(
     /** Сбросить Finished/Error в Idle после того, как UI «забрал» результат. */
     fun acknowledge() = controller.acknowledge()
 
-    /** CameraX начал писать [videoFile] — фиксируем это в общем состоянии. */
+    /**
+     * CameraX начала писать [videoFile] — фиксируем это в общем состоянии и сразу же
+     * (A4, #98) просим сервис поднять параллельный `MediaRecorder` для звука —
+     * максимально близко по времени к старту CameraX (см. класс-докблок).
+     */
     fun onVideoStarted(sessionId: String, videoFile: File) {
-        controller.update(
-            RecordingState.Recording(
-                sessionId = sessionId,
-                startedElapsedRealtimeMs = SystemClock.elapsedRealtime(),
-                mode = RecordingMode.VIDEO,
-                videoPath = videoFile.absolutePath,
-            ),
-        )
+        controller.videoStarted(sessionId, videoFile.absolutePath, SystemClock.elapsedRealtime())
+        controller.startAudioSidecar(sessionId)
     }
 
     /** CameraX финализировал файл — видео готово (остаётся только локально). */
     fun onVideoFinished(sessionId: String, videoFile: File, durationMs: Long) {
-        controller.update(
-            RecordingState.Finished(
-                sessionId = sessionId,
-                durationMs = durationMs,
-                mode = RecordingMode.VIDEO,
-                videoPath = videoFile.absolutePath,
-            ),
-        )
+        controller.videoFinished(sessionId, videoFile.absolutePath, durationMs)
     }
 
     /** Видеозапись не удалась (нет файла/сбой камеры) — например, обрыв без данных. */
     fun onVideoError(sessionId: String?, message: String) {
-        controller.update(RecordingState.Error(sessionId, message, RecordingMode.VIDEO))
+        controller.videoError(sessionId, message)
     }
+
+    /** Остановить аудио-сайдкар видео-режима (A4, #98) — зовётся вместе с остановкой CameraX. */
+    fun stopVideoAudioSidecar() = controller.stopAudioSidecar()
 }

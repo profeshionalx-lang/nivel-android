@@ -43,6 +43,15 @@ val CARD_TAGS = listOf("техника", "тактика", "физика", "ме
 val CARD_SIDES = listOf("защита", "атака")
 
 /**
+ * Лимиты полей правки карточки — как `maxLength` на `<input>`/`<textarea>` в вебе
+ * (`EditAiCardModal`) и серверная валидация (`validateAiInsightCardPatch`). Ввод
+ * жёстко обрезаем на этой длине же в [SessionDetailViewModel.onEditTitleChange]/
+ * [SessionDetailViewModel.onEditBodyChange] — не только блокируем «Сохранить».
+ */
+const val CARD_TITLE_MAX_LENGTH = 80
+const val CARD_BODY_MAX_LENGTH = 400
+
+/**
  * Состояние bottom-sheet правки карточки (A2, #96, порт `EditAiCardModal`). `Closed` —
  * скрыт; `Open` — открыт с редактируемыми полями, индикатором отправки и ошибкой.
  * `cardId` нужен для PATCH; `quote` показываем read-only (как в вебе).
@@ -61,8 +70,8 @@ sealed interface EditSheetState {
     ) : EditSheetState {
         /** Валидность как в вебе: title 1..80, body 1..400, tag/side из наборов. */
         val isValid: Boolean
-            get() = title.trim().length in 1..80 &&
-                body.trim().length in 1..400 &&
+            get() = title.trim().length in 1..CARD_TITLE_MAX_LENGTH &&
+                body.trim().length in 1..CARD_BODY_MAX_LENGTH &&
                 tag in CARD_TAGS &&
                 side in CARD_SIDES
     }
@@ -383,26 +392,35 @@ class SessionDetailViewModel @Inject constructor(
 
     // --- A2 (#96): ревью draft-карточек (одобрить / отклонить / редактировать) ---
 
+    /** Id карточек с уже отправленным approve/reject — гард от дубликатов на быстрый двойной тап/свайп. */
+    private val pendingCardActions = mutableSetOf<String>()
+
     /**
      * Одобрить карточку. UI (свайп-стек) оптимистично убирает её из локальной
      * очереди; здесь шлём действие на сервер и перечитываем карточки. При ошибке
      * показываем баннер и тоже перечитываем — сервер вернёт правду (карточка
      * останется/вернётся в drafts, свайп-стек пересинкается по актуальному списку).
      */
-    fun approveCard(cardId: String) = runCardAction { insightsRepository.approveCard(cardId) }
+    fun approveCard(cardId: String) = runCardAction(cardId) { insightsRepository.approveCard(cardId) }
 
     /** Отклонить карточку (см. [approveCard]). */
-    fun rejectCard(cardId: String) = runCardAction { insightsRepository.rejectCard(cardId) }
+    fun rejectCard(cardId: String) = runCardAction(cardId) { insightsRepository.rejectCard(cardId) }
 
-    private fun runCardAction(action: suspend () -> CardActionResult) {
+    /** cardId != null: гардим от повторного тапа/свайпа по той же карточке, пока первый запрос летит. */
+    private fun runCardAction(cardId: String? = null, action: suspend () -> CardActionResult) {
+        if (cardId != null && !pendingCardActions.add(cardId)) return
         _uiState.update { it.copy(cardActionError = null) }
         viewModelScope.launch {
-            when (val result = action()) {
-                is CardActionResult.Success -> refresh()
-                is CardActionResult.Failure -> {
-                    _uiState.update { it.copy(cardActionError = result.message) }
-                    refresh()
+            try {
+                when (val result = action()) {
+                    is CardActionResult.Success -> refresh()
+                    is CardActionResult.Failure -> {
+                        _uiState.update { it.copy(cardActionError = result.message) }
+                        refresh()
+                    }
                 }
+            } finally {
+                if (cardId != null) pendingCardActions.remove(cardId)
             }
         }
     }
@@ -438,8 +456,12 @@ class SessionDetailViewModel @Inject constructor(
         _uiState.update { it.copy(editSheet = EditSheetState.Closed) }
     }
 
-    fun onEditTitleChange(value: String) = updateEditSheet { it.copy(title = value, error = null) }
-    fun onEditBodyChange(value: String) = updateEditSheet { it.copy(body = value, error = null) }
+    /** Обрезаем ввод по лимиту сразу — как `maxLength` на вебе, не только блокировка «Сохранить». */
+    fun onEditTitleChange(value: String) =
+        updateEditSheet { it.copy(title = value.take(CARD_TITLE_MAX_LENGTH), error = null) }
+
+    fun onEditBodyChange(value: String) =
+        updateEditSheet { it.copy(body = value.take(CARD_BODY_MAX_LENGTH), error = null) }
     fun onEditTagChange(value: String) = updateEditSheet { it.copy(tag = value, error = null) }
     fun onEditSideChange(value: String) = updateEditSheet { it.copy(side = value, error = null) }
 

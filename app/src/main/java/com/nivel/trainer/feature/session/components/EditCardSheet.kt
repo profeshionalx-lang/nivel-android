@@ -29,8 +29,10 @@ import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.nivel.trainer.feature.session.CARD_BODY_MAX_LENGTH
 import com.nivel.trainer.feature.session.CARD_SIDES
 import com.nivel.trainer.feature.session.CARD_TAGS
+import com.nivel.trainer.feature.session.CARD_TITLE_MAX_LENGTH
 import com.nivel.trainer.feature.session.EditSheetState
 
 /**
@@ -84,7 +86,7 @@ internal fun EditCardSheet(
 
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(
-                    text = "Заголовок (${state.title.trim().length}/80)",
+                    text = "Заголовок (${state.title.trim().length}/$CARD_TITLE_MAX_LENGTH)",
                     color = OnSurfaceVariant,
                     fontSize = 10.sp,
                     fontWeight = FontWeight.Black,
@@ -101,7 +103,7 @@ internal fun EditCardSheet(
 
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(
-                    text = "Описание (${state.body.trim().length}/400)",
+                    text = "Описание (${state.body.trim().length}/$CARD_BODY_MAX_LENGTH)",
                     color = OnSurfaceVariant,
                     fontSize = 10.sp,
                     fontWeight = FontWeight.Black,

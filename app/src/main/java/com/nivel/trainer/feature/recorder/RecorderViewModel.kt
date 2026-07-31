@@ -56,9 +56,13 @@ class RecorderViewModel @Inject constructor(
         controller.startAudioSidecar(sessionId)
     }
 
-    /** CameraX финализировал файл — видео готово (остаётся только локально). */
-    fun onVideoFinished(sessionId: String, videoFile: File, durationMs: Long) {
-        controller.videoFinished(sessionId, videoFile.absolutePath, durationMs)
+    /**
+     * CameraX финализировал файл — видео готово (остаётся только локально).
+     * [interrupted] (#106) — запись прервалась не по команде тренера (CameraX
+     * финализировал с ошибкой, но файл непустой) — экран должен это показать.
+     */
+    fun onVideoFinished(sessionId: String, videoFile: File, durationMs: Long, interrupted: Boolean = false) {
+        controller.videoFinished(sessionId, videoFile.absolutePath, durationMs, interrupted)
     }
 
     /** Видеозапись не удалась (нет файла/сбой камеры) — например, обрыв без данных. */

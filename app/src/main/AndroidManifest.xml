@@ -29,12 +29,20 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.Nivel">
 
+        <!-- #106: configChanges на orientation|screenSize|... не даёт системе пересоздавать
+             Activity при повороте — иначе CameraX (привязан к LifecycleOwner Activity, см.
+             VideoRecorder.bind) отвязывается на пересоздании и финализирует видеозапись
+             тренировки как при сворачивании. Single-Activity + Compose: recreate тут не
+             несёт полезной нагрузки (весь стейт — в rememberSaveable/ViewModel/process-wide
+             RecordingController), Compose и так корректно перекомпонует layout на новую
+             Configuration без ручного onConfigurationChanged. -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
             android:label="@string/app_name"
             android:launchMode="singleTask"
-            android:theme="@style/Theme.Nivel.Splash">
+            android:theme="@style/Theme.Nivel.Splash"
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|uiMode">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />

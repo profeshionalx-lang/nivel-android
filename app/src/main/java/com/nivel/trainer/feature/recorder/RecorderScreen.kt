@@ -406,7 +406,11 @@ private fun VideoFlow(
     val finished = state is RecordingState.Finished && state.mode == RecordingMode.VIDEO
     LaunchedEffect(finished) {
         if (finished) {
-            delay(1_400)
+            // #106: обрыв держим на экране дольше обычного «успеха» — тренер должен
+            // успеть прочитать, что запись прервалась не по его команде, а не просто
+            // мелькнуть тем же временем, что и штатное «Видео сохранено».
+            val interrupted = (state as? RecordingState.Finished)?.interrupted == true
+            delay(if (interrupted) 3_000 else 1_400)
             viewModel.acknowledge()
             onClose()
         }
@@ -438,12 +442,25 @@ private fun VideoFlow(
                 modifier = Modifier.fillMaxSize().padding(horizontal = 28.dp),
                 contentAlignment = Alignment.Center,
             ) {
-                StatusContent(
-                    glyph = "✓",
-                    glyphColor = Primary,
-                    title = "Видео сохранено",
-                    subtitle = "Файл остался на телефоне — пригодится для разбора моментов.",
-                )
+                // #106: если CameraX финализировал с ошибкой (обрыв не по команде
+                // тренера — например, сбой камеры или нехватка места на середине),
+                // но файл непустой — не рисуем это как обычный «успех» молча.
+                if (s.interrupted) {
+                    StatusContent(
+                        glyph = "⚠",
+                        glyphColor = ErrorColor,
+                        title = "Запись прервалась",
+                        subtitle = "Снято ${formatDuration(s.durationMs)} — часть тренировки не попала в " +
+                            "запись. Файл сохранён и пригодится для разбора моментов.",
+                    )
+                } else {
+                    StatusContent(
+                        glyph = "✓",
+                        glyphColor = Primary,
+                        title = "Видео сохранено",
+                        subtitle = "Файл остался на телефоне — пригодится для разбора моментов.",
+                    )
+                }
             }
         }
 
@@ -469,6 +486,7 @@ private fun VideoFlow(
                                 sessionId = sessionId,
                                 videoFile = result.file,
                                 durationMs = SystemClock.elapsedRealtime() - startedAt,
+                                interrupted = result.interrupted,
                             )
 
                             is VideoRecordingResult.Failure -> viewModel.onVideoError(sessionId, result.message)

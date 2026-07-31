@@ -433,6 +433,11 @@ data class SessionInsightCardsResponse(
 /**
  * Карточка из `getSessionInsightCardsCore`: без session_id/student_id/trainer_id
  * (их даёт путь/контекст запроса). session_id для кэша/домена подставляем из пути.
+ *
+ * A5 (#99, зависит от NIVEL#241/S6): `moment_before_seconds`/`moment_after_seconds` —
+ * таймкоды моментов «до»/«после» в секундах (`null`, если LLM/fallback их не нашёл);
+ * `frame_before_url`/`frame_after_url` — подписанный URL кадра в Storage (`session-frames`,
+ * TTL ~24ч), `null` если кадр не приложен. Сырые `frame_*_path` сервер намеренно не отдаёт.
  */
 @Serializable
 data class SessionInsightCardDto(
@@ -448,6 +453,10 @@ data class SessionInsightCardDto(
     @SerialName("student_decision") val studentDecision: String? = null,
     val position: Int = 0,
     @SerialName("created_at") val createdAt: String? = null,
+    @SerialName("moment_before_seconds") val momentBeforeSeconds: Double? = null,
+    @SerialName("moment_after_seconds") val momentAfterSeconds: Double? = null,
+    @SerialName("frame_before_url") val frameBeforeUrl: String? = null,
+    @SerialName("frame_after_url") val frameAfterUrl: String? = null,
 )
 
 // -----------------------------------------------------------------------------

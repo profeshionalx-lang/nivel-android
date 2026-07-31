@@ -6,15 +6,19 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import coil.compose.AsyncImage
 import com.nivel.trainer.domain.InsightCard
 
 /** Карточка инсайта read-only: заголовок + тело + теги. Действия — задачи D2–D4. */
@@ -123,6 +127,32 @@ internal fun DraggableCardView(card: InsightCard, isDragged: Boolean, alpha: Flo
                 fontWeight = FontWeight.Black,
                 letterSpacing = 1.sp,
             )
+            // A5 (#99): миниатюры приложенных кадров «до»/«после» — минимальный показ,
+            // что кадр выбран; полноценные слоты со скрабером — A8.
+            if (card.frameBeforeUrl != null || card.frameAfterUrl != null) {
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    card.frameBeforeUrl?.let { url ->
+                        AsyncImage(
+                            model = url,
+                            contentDescription = null,
+                            modifier = Modifier
+                                .size(48.dp)
+                                .clip(RoundedCornerShape(6.dp)),
+                            contentScale = ContentScale.Crop,
+                        )
+                    }
+                    card.frameAfterUrl?.let { url ->
+                        AsyncImage(
+                            model = url,
+                            contentDescription = null,
+                            modifier = Modifier
+                                .size(48.dp)
+                                .clip(RoundedCornerShape(6.dp)),
+                            contentScale = ContentScale.Crop,
+                        )
+                    }
+                }
+            }
         }
         // Drag-хэндл — намёк для пользователя (long-press активирует drag).
         Text(

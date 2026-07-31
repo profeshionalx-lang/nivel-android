@@ -44,7 +44,13 @@ data class TrainingSession(
     val createdAt: String?,
 )
 
-/** Инсайт-карточка (разбор ошибки) в рамках сессии. */
+/**
+ * Инсайт-карточка (разбор ошибки) в рамках сессии.
+ *
+ * A5 (#99): [momentBeforeSeconds]/[momentAfterSeconds] — таймкоды моментов «до»/«после»
+ * в видео (по ним открывается скрабер), [frameBeforeUrl]/[frameAfterUrl] — подписанный
+ * URL уже приложенного кадра. Все четыре `null`, если LLM их не нашёл / кадр не приложен.
+ */
 data class InsightCard(
     val id: String,
     val sessionId: String,
@@ -61,6 +67,10 @@ data class InsightCard(
     val studentDecision: String?,
     val position: Int,
     val createdAt: String?,
+    val momentBeforeSeconds: Double? = null,
+    val momentAfterSeconds: Double? = null,
+    val frameBeforeUrl: String? = null,
+    val frameAfterUrl: String? = null,
 )
 
 // --- B5 (#8): профиль ученика (просмотр) ---

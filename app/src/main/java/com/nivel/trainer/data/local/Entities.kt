@@ -63,4 +63,9 @@ data class InsightCardEntity(
     val studentDecision: String?,
     val position: Int,
     val createdAt: String?,
+    /** A5 (#99): таймкоды моментов «до»/«после» (сек) и подписанные URL приложенных кадров. */
+    val momentBeforeSeconds: Double? = null,
+    val momentAfterSeconds: Double? = null,
+    val frameBeforeUrl: String? = null,
+    val frameAfterUrl: String? = null,
 )

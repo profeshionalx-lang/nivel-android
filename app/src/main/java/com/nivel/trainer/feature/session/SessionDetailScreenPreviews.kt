@@ -96,3 +96,44 @@ private fun SessionUploadingPreview() {
         )
     }
 }
+
+// --- A9 (#103): индикатор занятого места видео ---
+
+@Preview(showBackground = true, backgroundColor = 0xFF0E0E0E)
+@Composable
+private fun SessionWithLocalVideoPreview() {
+    NivelTheme {
+        SessionDetailContent(
+            loading = false,
+            error = null,
+            overview = SessionOverview(
+                detail = previewDetail,
+                audio = SessionAudioStatus("ready", null, "ready", null),
+                cards = listOf(previewCard("c1", "Приём слева под давлением", "approved", "техника")),
+            ),
+            localVideo = LocalVideoUiState.Present(sizeBytes = 2_400_000_000L),
+            onBack = {},
+            onRetry = {},
+        )
+    }
+}
+
+/** Сирота (п.5 issue): разбор уже завершён (в т.ч. из веба), а видео на телефоне ещё есть. */
+@Preview(showBackground = true, backgroundColor = 0xFF0E0E0E)
+@Composable
+private fun SessionOrphanVideoPreview() {
+    NivelTheme {
+        SessionDetailContent(
+            loading = false,
+            error = null,
+            overview = SessionOverview(
+                detail = previewDetail.copy(trainerReviewCompleted = true),
+                audio = SessionAudioStatus("ready", null, "ready", null),
+                cards = listOf(previewCard("c1", "Приём слева под давлением", "approved", "техника")),
+            ),
+            localVideo = LocalVideoUiState.Present(sizeBytes = 480_000_000L),
+            onBack = {},
+            onRetry = {},
+        )
+    }
+}

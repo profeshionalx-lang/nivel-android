@@ -28,6 +28,7 @@ import com.nivel.trainer.feature.session.components.PasteInsightsSheet
 import com.nivel.trainer.feature.session.components.Primary
 import com.nivel.trainer.feature.session.components.SessionBody
 import com.nivel.trainer.feature.session.components.SurfaceCard
+import com.nivel.trainer.feature.session.components.VideoDeleteConfirmSheet
 import com.nivel.trainer.feature.session.components.headerTitle
 import com.nivel.trainer.service.upload.UploadStage
 import com.nivel.trainer.ui.state.RefreshOnResume
@@ -97,6 +98,7 @@ fun SessionDetailScreen(
         reorderedCards = state.reorderedCards,
         isOffline = state.isOffline,
         cardActionError = state.cardActionError,
+        localVideo = state.localVideo,
         onGenerate = viewModel::generateInsights,
         onOpenPaste = viewModel::openPasteSheet,
         onOpenLibrary = viewModel::openLibrarySheet,
@@ -112,8 +114,21 @@ fun SessionDetailScreen(
         onRecord = onRecord,
         onRetry = viewModel::refresh,
         onRetryUpload = viewModel::retryUpload,
+        onDeleteVideo = viewModel::requestDeleteVideo,
+        onDismissVideoError = viewModel::dismissVideoError,
         modifier = modifier,
     )
+
+    // A9 (#103): подтверждение удаления видео — общее для «Завершить разбор» и ручного удаления.
+    val videoDeleteConfirm = state.videoDeleteConfirm
+    if (videoDeleteConfirm is VideoDeleteConfirmState.Open) {
+        VideoDeleteConfirmSheet(
+            sizeBytes = videoDeleteConfirm.sizeBytes,
+            intent = videoDeleteConfirm.intent,
+            onConfirm = viewModel::confirmVideoDelete,
+            onDismiss = viewModel::dismissVideoDeleteConfirm,
+        )
+    }
 
     val sheet = state.pasteSheet
     if (sheet is PasteSheetState.Open) {
@@ -172,6 +187,7 @@ internal fun SessionDetailContent(
     reorderedCards: List<com.nivel.trainer.domain.InsightCard>? = null,
     isOffline: Boolean = false,
     cardActionError: String? = null,
+    localVideo: LocalVideoUiState = LocalVideoUiState.None,
     onGenerate: () -> Unit = {},
     onOpenPaste: () -> Unit = {},
     onOpenLibrary: () -> Unit = {},
@@ -185,6 +201,8 @@ internal fun SessionDetailContent(
     onRejectCard: (String) -> Unit = {},
     onEditCard: (com.nivel.trainer.domain.InsightCard) -> Unit = {},
     onDismissCardActionError: () -> Unit = {},
+    onDeleteVideo: () -> Unit = {},
+    onDismissVideoError: () -> Unit = {},
 ) {
     Column(
         modifier = modifier
@@ -227,6 +245,7 @@ internal fun SessionDetailContent(
                     uploadStage = uploadStage,
                     completingReview = completingReview,
                     cards = reorderedCards ?: overview.cards,
+                    localVideo = localVideo,
                     onGenerate = onGenerate,
                     onOpenPaste = onOpenPaste,
                     onOpenLibrary = onOpenLibrary,
@@ -238,6 +257,8 @@ internal fun SessionDetailContent(
                     onApproveCard = onApproveCard,
                     onRejectCard = onRejectCard,
                     onEditCard = onEditCard,
+                    onDeleteVideo = onDeleteVideo,
+                    onDismissVideoError = onDismissVideoError,
                 )
 
                 else -> CenterBox { EmptyState() }

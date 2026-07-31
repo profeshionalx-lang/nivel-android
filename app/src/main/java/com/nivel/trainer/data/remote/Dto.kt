@@ -448,6 +448,12 @@ data class SessionInsightCardDto(
     @SerialName("student_decision") val studentDecision: String? = null,
     val position: Int = 0,
     @SerialName("created_at") val createdAt: String? = null,
+    // A5 (#99): моменты «до»/«после» (сек., для скрабера) и подписанные URL
+    // приложенных кадров (`session-frames`, TTL ~24ч) — `getSessionInsightCardsCore`.
+    @SerialName("moment_before_seconds") val momentBeforeSeconds: Double? = null,
+    @SerialName("moment_after_seconds") val momentAfterSeconds: Double? = null,
+    @SerialName("frame_before_url") val frameBeforeUrl: String? = null,
+    @SerialName("frame_after_url") val frameAfterUrl: String? = null,
 )
 
 // -----------------------------------------------------------------------------

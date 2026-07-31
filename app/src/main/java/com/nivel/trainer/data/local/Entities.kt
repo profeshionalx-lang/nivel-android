@@ -63,4 +63,10 @@ data class InsightCardEntity(
     val studentDecision: String?,
     val position: Int,
     val createdAt: String?,
+    // A5 (#99): моменты «до»/«после» и URL кадров — тот же кэш чтения, что и
+    // остальные серверные поля карточки (destructive migration, version 3).
+    val momentBeforeSeconds: Double?,
+    val momentAfterSeconds: Double?,
+    val frameBeforeUrl: String?,
+    val frameAfterUrl: String?,
 )

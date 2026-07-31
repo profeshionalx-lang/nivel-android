@@ -176,6 +176,8 @@ private fun DraftCardFace(card: InsightCard, modifier: Modifier = Modifier) {
         card.quote?.takeIf { it.isNotBlank() }?.let {
             Text(text = "«$it»", color = OnSurfaceVariant, fontSize = 12.sp, fontStyle = FontStyle.Italic)
         }
+        // Порядок как в вебе (`AiInsightCard`): заголовок → тело → цитата → кадры.
+        InsightFrameThumbnails(card)
     }
 }
 

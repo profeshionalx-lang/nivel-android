@@ -2,6 +2,8 @@ package com.nivel.trainer.service.video
 
 import android.content.Context
 import android.os.StatFs
+import android.view.OrientationEventListener
+import android.view.Surface
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
@@ -61,9 +63,15 @@ object VideoFreeSpace {
 /**
  * Результат остановки видеозаписи: файл готов ([Success]) или запись не удалась
  * ([Failure] — например, файл пустой/не создался вовсе).
+ *
+ * [Success.interrupted] (#106) — true, если CameraX финализировал `Recording` с
+ * `hasError() == true` (обрыв не по команде тренера — например, поворот экрана
+ * успел проскочить до фикса, сбой камеры, нехватка места на середине), но файл
+ * при этом непустой и играбельный. Частичный mp4 — осознанный успех (годится для
+ * выбора кадров), но тренер должен видеть, что запись прервалась не сама.
  */
 sealed interface VideoRecordingResult {
-    data class Success(val file: File) : VideoRecordingResult
+    data class Success(val file: File, val interrupted: Boolean = false) : VideoRecordingResult
     data class Failure(val message: String) : VideoRecordingResult
 }
 
@@ -85,6 +93,20 @@ class VideoRecorder(private val context: Context) {
     private var videoCapture: VideoCapture<Recorder>? = null
     private var activeRecording: Recording? = null
 
+    // Провайдер сохраняется из bind() (#106), чтобы release() не дёргал повторный
+    // блокирующий ProcessCameraProvider.getInstance(context).get() на главном потоке —
+    // future там гарантированно уже разрешён к моменту первого bind(), но повторный
+    // вызов getInstance() всё равно синхронный API и в теории может подвиснуть.
+    private var cameraProvider: ProcessCameraProvider? = null
+
+    // #106: activity больше не пересоздаётся на поворот (см. AndroidManifest —
+    // configChanges), поэтому Preview/VideoCapture держат targetRotation, снятый
+    // ОДИН раз в bind(). Раньше пересоздание Activity само переустанавливало его —
+    // теперь это отслеживаем отдельно через сенсор, иначе после физического
+    // поворота (телефон на штативе, лёг горизонтально) записанный файл выйдет
+    // повёрнутым, хотя сама запись больше не прерывается.
+    private var rotationListener: OrientationEventListener? = null
+
     /**
      * Поднять камеру и привязать превью+рекордер к [lifecycleOwner]. Из-за того, что
      * привязка идёт к жизненному циклу экрана — сворачивание/звонок (`ON_STOP`)
@@ -93,6 +115,7 @@ class VideoRecorder(private val context: Context) {
      */
     suspend fun bind(previewView: PreviewView, lifecycleOwner: LifecycleOwner) {
         val provider = getCameraProvider()
+        cameraProvider = provider
         val preview = Preview.Builder().build().apply {
             surfaceProvider = previewView.surfaceProvider
         }
@@ -114,6 +137,31 @@ class VideoRecorder(private val context: Context) {
             capture,
         )
         videoCapture = capture
+        trackRotation(preview, capture)
+    }
+
+    /**
+     * Держит `targetRotation` [preview]/[capture] в актуальном состоянии по показаниям
+     * сенсора (#106) — без этого после поворота посреди записи (или до старта, пока
+     * тренер наводит штатив) итоговый mp4 записался бы с устаревшей ориентацией, хотя
+     * сама запись теперь и не прерывается. Пороги — стандартная раскладка 4 квадрантов
+     * по 90°, со сдвигом на полквадранта, как в примерах CameraX.
+     */
+    private fun trackRotation(preview: Preview, capture: VideoCapture<Recorder>) {
+        rotationListener?.disable()
+        rotationListener = object : OrientationEventListener(context) {
+            override fun onOrientationChanged(orientation: Int) {
+                if (orientation == ORIENTATION_UNKNOWN) return
+                val rotation = when (orientation) {
+                    in 45 until 135 -> Surface.ROTATION_270
+                    in 135 until 225 -> Surface.ROTATION_180
+                    in 225 until 315 -> Surface.ROTATION_90
+                    else -> Surface.ROTATION_0
+                }
+                preview.targetRotation = rotation
+                capture.targetRotation = rotation
+            }
+        }.apply { enable() }
     }
 
     /**
@@ -140,7 +188,7 @@ class VideoRecorder(private val context: Context) {
                     // контейнер: если файл непустой, он играбелен — считаем это успехом,
                     // а не падением, чтобы частичная запись не терялась.
                     if (file.exists() && file.length() > 0) {
-                        onEvent(VideoRecordingResult.Success(file))
+                        onEvent(VideoRecordingResult.Success(file, interrupted = hasError))
                     } else {
                         onEvent(
                             VideoRecordingResult.Failure(
@@ -162,11 +210,18 @@ class VideoRecorder(private val context: Context) {
         activeRecording = null
     }
 
-    /** Отвязать камеру (уход с экрана записи) — CameraX сам остановит активную запись. */
+    /**
+     * Отвязать камеру (уход с экрана записи) — CameraX сам остановит активную запись.
+     * Использует провайдер, сохранённый в [bind] (#106) — без повторного блокирующего
+     * `ProcessCameraProvider.getInstance().get()` на главном потоке.
+     */
     fun release() {
         activeRecording?.stop()
         activeRecording = null
-        runCatching { ProcessCameraProvider.getInstance(context).get().unbindAll() }
+        rotationListener?.disable()
+        rotationListener = null
+        cameraProvider?.unbindAll()
+        cameraProvider = null
         videoCapture = null
     }
 

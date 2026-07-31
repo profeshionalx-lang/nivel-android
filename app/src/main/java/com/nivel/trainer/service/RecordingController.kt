@@ -67,7 +67,10 @@ sealed interface RecordingState {
      * заливки (C3); видео-файл [videoPath] остаётся только локально — на сервер
      * видео не уезжает (см. эпик NIVEL#235), заливки для него нет. [audioStartOffsetMs] —
      * см. докблок [Recording], нужен для скрабера (A6), чтобы поправить таймкод момента
-     * на рассинхрон стартов двух рекордеров.
+     * на рассинхрон стартов двух рекордеров. [interrupted] (#106, только для
+     * [RecordingMode.VIDEO]) — true, если CameraX финализировал запись с ошибкой
+     * (обрыв не по команде тренера), но файл всё равно непустой и играбельный —
+     * экран должен показать это, а не рисовать обычный «успех».
      */
     data class Finished(
         val sessionId: String,
@@ -76,6 +79,7 @@ sealed interface RecordingState {
         val outputPath: String? = null,
         val videoPath: String? = null,
         val audioStartOffsetMs: Long? = null,
+        val interrupted: Boolean = false,
     ) : RecordingState
 
     /** Ошибка записи (нет разрешения, занят микрофон/камера, сбой кодека, мало места). */
@@ -114,7 +118,12 @@ class RecordingController @Inject constructor(
     // Половинки видео-сессии (A4, #98): CameraX и аудио-сайдкар финализируются
     // независимо и в произвольном порядке — копим то, что пришло первым, и не
     // публикуем итоговый Finished, пока не придут ОБЕ части.
-    private data class PendingVideo(val sessionId: String, val videoPath: String, val durationMs: Long)
+    private data class PendingVideo(
+        val sessionId: String,
+        val videoPath: String,
+        val durationMs: Long,
+        val interrupted: Boolean = false,
+    )
     private data class PendingAudio(val sessionId: String, val audioPath: String, val durationMs: Long)
     private data class ActiveVideoStart(val startedAtEpochMs: Long, val startedElapsedRealtimeMs: Long)
 
@@ -257,9 +266,12 @@ class RecordingController @Inject constructor(
         tryFinalizeVideoSession(sessionId)
     }
 
-    /** Экран записи сообщает: CameraX финализировал видеофайл. */
-    fun videoFinished(sessionId: String, videoPath: String, durationMs: Long) {
-        pendingVideo = PendingVideo(sessionId, videoPath, durationMs)
+    /**
+     * Экран записи сообщает: CameraX финализировал видеофайл. [interrupted] (#106) —
+     * см. докблок [RecordingState.Finished].
+     */
+    fun videoFinished(sessionId: String, videoPath: String, durationMs: Long, interrupted: Boolean = false) {
+        pendingVideo = PendingVideo(sessionId, videoPath, durationMs, interrupted)
         tryFinalizeVideoSession(sessionId)
     }
 
@@ -298,6 +310,7 @@ class RecordingController @Inject constructor(
             outputPath = audio.audioPath,
             videoPath = video.videoPath,
             audioStartOffsetMs = offsetMs,
+            interrupted = video.interrupted,
         )
         // Хэндофф: в очередь заливки уходит ТОЛЬКО аудио (существующий шедулер, ничего
         // в нём не меняем) — видео на сервер не уезжает (эпик NIVEL#235).

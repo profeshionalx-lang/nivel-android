@@ -51,7 +51,24 @@ class RecordingService : Service() {
     private var recorder: MediaRecorder? = null
     private var sessionId: String? = null
     private var outputFile: File? = null
+
+    // Момент входа в startRecording() — используется ТОЛЬКО для приблизительного
+    // "when" уведомления (setWhen в buildNotification): notification обязана подняться
+    // (promoteToForeground) ДО того, как mr вообще существует, так что точного момента
+    // старта записи для неё ещё нет. Не использовать для расчёта durationMs/оффсета —
+    // для этого есть [recordingStartedElapsedRealtimeMs] ниже.
     private var startedElapsedRealtimeMs: Long = 0L
+
+    // Момент, когда MediaRecorder РЕАЛЬНО начал писать (сразу после успешного mr.start(),
+    // а не когда сервис только принял intent) — от него считаем durationMs (stopRecording)
+    // и его же репортим в RecordingController (Recording.startedElapsedRealtimeMs для
+    // AUDIO / onAudioSidecarStarted для сайдкара VIDEO-режима, A4/#98). Это важно для
+    // audioStartOffsetMs: между входом в startRecording() и реальным стартом записи
+    // проходит promoteToForeground() (создание канала, уведомление) + mr.prepare()
+    // (инициализация кодека) — десятки-сотни мс, которые иначе тихо съедались бы из
+    // измеряемого дрейфа звук/видео (см. Acceptance issue #98 — обязательное измерение
+    // дрейфа на реальном устройстве).
+    private var recordingStartedElapsedRealtimeMs: Long = 0L
     private var mode: RecordingMode = RecordingMode.AUDIO
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -126,6 +143,8 @@ class RecordingService : Service() {
             finishForeground()
             return
         }
+        // Отсюда MediaRecorder реально пишет — это и есть настоящий момент старта.
+        recordingStartedElapsedRealtimeMs = SystemClock.elapsedRealtime()
 
         recorder = mr
         this.sessionId = sessionId
@@ -135,13 +154,13 @@ class RecordingService : Service() {
                 RecordingState.Recording(
                     sessionId = sessionId,
                     outputPath = file.absolutePath,
-                    startedElapsedRealtimeMs = startedElapsedRealtimeMs,
+                    startedElapsedRealtimeMs = recordingStartedElapsedRealtimeMs,
                 ),
             )
             RecordingMode.VIDEO -> controller.onAudioSidecarStarted(
                 sessionId = sessionId,
                 audioPath = file.absolutePath,
-                startedElapsedRealtimeMs = startedElapsedRealtimeMs,
+                startedElapsedRealtimeMs = recordingStartedElapsedRealtimeMs,
             )
         }
     }
@@ -157,7 +176,7 @@ class RecordingService : Service() {
             return
         }
 
-        val durationMs = SystemClock.elapsedRealtime() - startedElapsedRealtimeMs
+        val durationMs = SystemClock.elapsedRealtime() - recordingStartedElapsedRealtimeMs
         // TODO(C4): для очень длинных записей финализация moov-атома в stop() может
         // занять заметное время — вынести stop()/release() в фоновый поток, чтобы не
         // блокировать main и не рисковать ANR. Для C1 (первый срез) — синхронно.

@@ -121,6 +121,10 @@ fun InsightCardEntity.toDomain() = InsightCard(
     studentDecision = studentDecision,
     position = position,
     createdAt = createdAt,
+    momentBeforeSeconds = momentBeforeSeconds,
+    momentAfterSeconds = momentAfterSeconds,
+    frameBeforeUrl = frameBeforeUrl,
+    frameAfterUrl = frameAfterUrl,
 )
 
 // --- B5 (#8): профиль ученика (DTO → domain напрямую, без Room) ---
@@ -329,6 +333,10 @@ fun SessionInsightCardDto.toDomain(sessionId: String) = InsightCard(
     studentDecision = studentDecision,
     position = position,
     createdAt = createdAt,
+    momentBeforeSeconds = momentBeforeSeconds,
+    momentAfterSeconds = momentAfterSeconds,
+    frameBeforeUrl = frameBeforeUrl,
+    frameAfterUrl = frameAfterUrl,
 )
 
 /** Агрегат домашнего экрана тренера (A6, #76) → доменная модель. */
@@ -374,6 +382,10 @@ fun SessionInsightCardDto.toEntity(sessionId: String) = InsightCardEntity(
     studentDecision = studentDecision,
     position = position,
     createdAt = createdAt,
+    momentBeforeSeconds = momentBeforeSeconds,
+    momentAfterSeconds = momentAfterSeconds,
+    frameBeforeUrl = frameBeforeUrl,
+    frameAfterUrl = frameAfterUrl,
 )
 
 // --- #78: применение коллекций карточек к сессии ---

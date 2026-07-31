@@ -137,4 +137,8 @@ private fun InsightCard.toCardEntity() = InsightCardEntity(
     studentDecision = studentDecision,
     position = position,
     createdAt = createdAt,
+    momentBeforeSeconds = momentBeforeSeconds,
+    momentAfterSeconds = momentAfterSeconds,
+    frameBeforeUrl = frameBeforeUrl,
+    frameAfterUrl = frameAfterUrl,
 )

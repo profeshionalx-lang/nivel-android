@@ -61,6 +61,12 @@ data class InsightCard(
     val studentDecision: String?,
     val position: Int,
     val createdAt: String?,
+    // A5 (#99): моменты «до»/«после» (сек., открывают скрабер) и URL уже
+    // приложенных кадров (null, если кадр не выбран или его подпись протухла).
+    val momentBeforeSeconds: Double? = null,
+    val momentAfterSeconds: Double? = null,
+    val frameBeforeUrl: String? = null,
+    val frameAfterUrl: String? = null,
 )
 
 // --- B5 (#8): профиль ученика (просмотр) ---

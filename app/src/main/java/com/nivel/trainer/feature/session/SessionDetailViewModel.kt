@@ -2,6 +2,7 @@ package com.nivel.trainer.feature.session
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.nivel.trainer.data.repository.CardActionResult
 import com.nivel.trainer.data.repository.InsightsRepository
 import com.nivel.trainer.data.repository.InsightsResult
 import com.nivel.trainer.data.repository.SessionCollectionsRepository
@@ -35,6 +36,45 @@ sealed interface PasteSheetState {
         val submitting: Boolean = false,
         val error: String? = null,
     ) : PasteSheetState
+}
+
+/** Допустимые темы/стороны карточки — один-в-один с вебом (`EditAiCardModal`). */
+val CARD_TAGS = listOf("техника", "тактика", "физика", "менталка")
+val CARD_SIDES = listOf("защита", "атака")
+
+/**
+ * Лимиты полей правки карточки — как `maxLength` на `<input>`/`<textarea>` в вебе
+ * (`EditAiCardModal`) и серверная валидация (`validateAiInsightCardPatch`). Ввод
+ * жёстко обрезаем на этой длине же в [SessionDetailViewModel.onEditTitleChange]/
+ * [SessionDetailViewModel.onEditBodyChange] — не только блокируем «Сохранить».
+ */
+const val CARD_TITLE_MAX_LENGTH = 80
+const val CARD_BODY_MAX_LENGTH = 400
+
+/**
+ * Состояние bottom-sheet правки карточки (A2, #96, порт `EditAiCardModal`). `Closed` —
+ * скрыт; `Open` — открыт с редактируемыми полями, индикатором отправки и ошибкой.
+ * `cardId` нужен для PATCH; `quote` показываем read-only (как в вебе).
+ */
+sealed interface EditSheetState {
+    data object Closed : EditSheetState
+    data class Open(
+        val cardId: String,
+        val title: String,
+        val body: String,
+        val tag: String,
+        val side: String,
+        val quote: String?,
+        val submitting: Boolean = false,
+        val error: String? = null,
+    ) : EditSheetState {
+        /** Валидность как в вебе: title 1..80, body 1..400, tag/side из наборов. */
+        val isValid: Boolean
+            get() = title.trim().length in 1..CARD_TITLE_MAX_LENGTH &&
+                body.trim().length in 1..CARD_BODY_MAX_LENGTH &&
+                tag in CARD_TAGS &&
+                side in CARD_SIDES
+    }
 }
 
 /**
@@ -101,6 +141,14 @@ data class SessionDetailUiState(
     val isOffline: Boolean = false,
     /** #78 — шит «Добавить из библиотеки» (применение коллекции карточек). */
     val librarySheet: LibrarySheetState = LibrarySheetState.Closed,
+    /** A2 (#96) — шит правки draft-карточки (approve/reject/edit ревью). */
+    val editSheet: EditSheetState = EditSheetState.Closed,
+    /**
+     * A2 (#96) — ошибка последнего действия approve/reject (баннер). Сбрасывается
+     * тапом или следующим действием ревью; после ошибки экран перечитывает карточки
+     * с сервера — карточка возвращается в исходный статус, если действие не дошло.
+     */
+    val cardActionError: String? = null,
 )
 
 /**
@@ -296,26 +344,39 @@ class SessionDetailViewModel @Inject constructor(
     /**
      * Оптимистично меняет порядок карточек локально во время перетаскивания.
      * Вызывается из UI на каждый onDragMove с новым индексом целевого элемента.
+     *
+     * A2 (#96): черновики теперь ревьюятся отдельно (см. [DraftReviewSection] на
+     * экране) и не участвуют в drag-and-drop списке — как и на вебе, где reorder
+     * доступен только approved-карточкам (`ApprovedCardsReorderable`). Индексы
+     * [fromIndex]/[toIndex] приходят от UI относительно approved-подсписка; здесь
+     * переставляем именно его, оставляя черновики на их исходных абсолютных позициях.
      */
     fun moveCard(fromIndex: Int, toIndex: Int) {
-        val current = _uiState.value.reorderedCards
+        val currentFull = _uiState.value.reorderedCards
             ?: _uiState.value.overview?.cards
             ?: return
         if (fromIndex == toIndex) return
-        val mutable = current.toMutableList()
-        val card = mutable.removeAt(fromIndex)
-        mutable.add(toIndex, card)
-        _uiState.update { it.copy(reorderedCards = mutable) }
+        val approvedAbsoluteIndices = currentFull.indices.filter { currentFull[it].trainerStatus == "approved" }
+        if (fromIndex !in approvedAbsoluteIndices.indices || toIndex !in approvedAbsoluteIndices.indices) return
+
+        val approved = approvedAbsoluteIndices.map { currentFull[it] }.toMutableList()
+        val card = approved.removeAt(fromIndex)
+        approved.add(toIndex, card)
+
+        val mutableFull = currentFull.toMutableList()
+        approvedAbsoluteIndices.forEachIndexed { i, absoluteIndex -> mutableFull[absoluteIndex] = approved[i] }
+        _uiState.update { it.copy(reorderedCards = mutableFull) }
     }
 
     /**
      * Фиксирует новый порядок на сервере после завершения drag-жеста.
      * Оптимистичный список уже применён — в случае ошибки сеть перечитаем через refresh().
+     * A2: на сервер уходят id только approved-карточек — черновики не переупорядочиваются.
      */
     fun commitCardReorder() {
         val id = sessionId ?: return
         val cards = _uiState.value.reorderedCards ?: return
-        val orderedIds = cards.map { it.id }
+        val orderedIds = cards.filter { it.trainerStatus == "approved" }.map { it.id }
         // Применяем reorderedCards в overview сразу, чтобы UI не мигал.
         val overview = _uiState.value.overview
         if (overview != null) {
@@ -326,6 +387,119 @@ class SessionDetailViewModel @Inject constructor(
         viewModelScope.launch {
             repository.reorderCards(id, orderedIds)
                 .onFailure { refresh() } // при ошибке перечитываем с сервера
+        }
+    }
+
+    // --- A2 (#96): ревью draft-карточек (одобрить / отклонить / редактировать) ---
+
+    /** Id карточек с уже отправленным approve/reject — гард от дубликатов на быстрый двойной тап/свайп. */
+    private val pendingCardActions = mutableSetOf<String>()
+
+    /**
+     * Одобрить карточку. UI (свайп-стек) оптимистично убирает её из локальной
+     * очереди; здесь шлём действие на сервер и перечитываем карточки. При ошибке
+     * показываем баннер и тоже перечитываем — сервер вернёт правду (карточка
+     * останется/вернётся в drafts, свайп-стек пересинкается по актуальному списку).
+     */
+    fun approveCard(cardId: String) = runCardAction(cardId) { insightsRepository.approveCard(cardId) }
+
+    /** Отклонить карточку (см. [approveCard]). */
+    fun rejectCard(cardId: String) = runCardAction(cardId) { insightsRepository.rejectCard(cardId) }
+
+    /** cardId != null: гардим от повторного тапа/свайпа по той же карточке, пока первый запрос летит. */
+    private fun runCardAction(cardId: String? = null, action: suspend () -> CardActionResult) {
+        if (cardId != null && !pendingCardActions.add(cardId)) return
+        _uiState.update { it.copy(cardActionError = null) }
+        viewModelScope.launch {
+            try {
+                when (val result = action()) {
+                    is CardActionResult.Success -> refresh()
+                    is CardActionResult.Failure -> {
+                        _uiState.update { it.copy(cardActionError = result.message) }
+                        refresh()
+                    }
+                }
+            } finally {
+                if (cardId != null) pendingCardActions.remove(cardId)
+            }
+        }
+    }
+
+    fun dismissCardActionError() {
+        _uiState.update { it.copy(cardActionError = null) }
+    }
+
+    /** Открыть шит правки: начальные значения как в вебе (`EditAiCardModal`). */
+    fun openEditSheet(card: InsightCard) {
+        val title = card.title?.takeIf { it.isNotBlank() } ?: card.frontText.orEmpty()
+        val body = card.body?.takeIf { it.isNotBlank() } ?: card.contextText.orEmpty()
+        val tag = card.tags.getOrNull(0)?.takeIf { it in CARD_TAGS } ?: CARD_TAGS.first()
+        val side = card.tags.getOrNull(1)?.takeIf { it in CARD_SIDES } ?: "атака"
+        _uiState.update {
+            it.copy(
+                editSheet = EditSheetState.Open(
+                    cardId = card.id,
+                    title = title,
+                    body = body,
+                    tag = tag,
+                    side = side,
+                    quote = card.quote?.takeIf { q -> q.isNotBlank() },
+                ),
+            )
+        }
+    }
+
+    /** Не закрываем во время отправки — иначе теряется введённый текст правки. */
+    fun closeEditSheet() {
+        val sheet = _uiState.value.editSheet
+        if (sheet is EditSheetState.Open && sheet.submitting) return
+        _uiState.update { it.copy(editSheet = EditSheetState.Closed) }
+    }
+
+    /** Обрезаем ввод по лимиту сразу — как `maxLength` на вебе, не только блокировка «Сохранить». */
+    fun onEditTitleChange(value: String) =
+        updateEditSheet { it.copy(title = value.take(CARD_TITLE_MAX_LENGTH), error = null) }
+
+    fun onEditBodyChange(value: String) =
+        updateEditSheet { it.copy(body = value.take(CARD_BODY_MAX_LENGTH), error = null) }
+    fun onEditTagChange(value: String) = updateEditSheet { it.copy(tag = value, error = null) }
+    fun onEditSideChange(value: String) = updateEditSheet { it.copy(side = value, error = null) }
+
+    private fun updateEditSheet(transform: (EditSheetState.Open) -> EditSheetState.Open) {
+        _uiState.update { state ->
+            val sheet = state.editSheet
+            if (sheet !is EditSheetState.Open) state else state.copy(editSheet = transform(sheet))
+        }
+    }
+
+    /**
+     * Сохранить правку. При успехе закрываем шит и перечитываем карточки — статус и
+     * контент приезжают с сервера, а не остаются только в локальном стейте (acceptance).
+     * При обрыве сети шит остаётся открытым с введённым текстом и текстом ошибки.
+     */
+    fun submitEdit() {
+        val sheet = _uiState.value.editSheet as? EditSheetState.Open ?: return
+        if (sheet.submitting || !sheet.isValid) return
+
+        _uiState.update { it.copy(editSheet = sheet.copy(submitting = true, error = null)) }
+        viewModelScope.launch {
+            val result = insightsRepository.updateCard(
+                cardId = sheet.cardId,
+                title = sheet.title.trim(),
+                body = sheet.body.trim(),
+                tag = sheet.tag,
+                side = sheet.side,
+            )
+            when (result) {
+                is CardActionResult.Success -> {
+                    _uiState.update { it.copy(editSheet = EditSheetState.Closed) }
+                    refresh()
+                }
+                is CardActionResult.Failure -> _uiState.update { state ->
+                    val open = state.editSheet as? EditSheetState.Open ?: return@update state
+                    state.copy(editSheet = open.copy(submitting = false, error = result.message))
+                }
+            }
         }
     }
 

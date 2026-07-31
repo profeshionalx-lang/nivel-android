@@ -21,11 +21,15 @@ import com.nivel.trainer.domain.SessionAudioStatus
 
 /**
  * Секция «Карточки» (веб, trainer): статус авто-анализа + кнопка вставки инсайтов
- * + черновики + approved. Порядок один-в-один с вебом (`sessions/[id]/page.tsx`).
+ * + черновики (ревью) + approved (reorder). Порядок один-в-один с вебом
+ * (`sessions/[id]/page.tsx`): сначала блок «Черновики (N)», затем «Approved (N)»,
+ * «Карточек пока нет» — только если обе группы пусты.
  *
- * D4 (#22): все карточки объединены в единый список с drag-and-drop через
- * long-press + drag жест. Оптимистичный ребаланс через [onMoveCard];
- * [onCardDragEnd] фиксирует порядок на сервере.
+ * A2 (#96): черновики (`trainerStatus == "draft"`) ревьюятся отдельно через
+ * [DraftReviewSection] (approve/reject/edit) — как на вебе `DraftCardsList`
+ * отделён от `ApprovedCardsReorderable`. D4 (#22): approved-карточки остаются в
+ * едином drag-and-drop списке через long-press ([DraggableCardList]); [onMoveCard]/
+ * [onCardDragEnd] работают только над approved-подсписком (см. `SessionDetailViewModel`).
  */
 @Composable
 internal fun CardsSection(
@@ -38,7 +42,13 @@ internal fun CardsSection(
     onOpenLibrary: () -> Unit,
     onMoveCard: (fromIndex: Int, toIndex: Int) -> Unit,
     onCardDragEnd: () -> Unit,
+    onApproveCard: (String) -> Unit,
+    onRejectCard: (String) -> Unit,
+    onEditCard: (InsightCard) -> Unit,
 ) {
+    val drafts = cards.filter { it.trainerStatus == "draft" }
+    val approved = cards.filter { it.trainerStatus != "draft" }
+
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
         Label("Карточки")
 
@@ -59,20 +69,32 @@ internal fun CardsSection(
         // #78 — применить готовую коллекцию карточек из библиотеки к этой сессии.
         LibraryButton(onClick = onOpenLibrary)
 
-        if (cards.isEmpty()) {
+        if (drafts.isEmpty() && approved.isEmpty()) {
             Text(
                 text = "Карточек пока нет — вставьте инсайты выше.",
                 color = OnSurfaceVariant,
                 fontSize = 14.sp,
             )
         } else {
-            // D4: drag-and-drop список. Все карточки (черновики + approved) в одном
-            // reorderable Column. Long-press активирует drag; отпускание фиксирует порядок.
-            DraggableCardList(
-                cards = cards,
-                onMoveCard = onMoveCard,
-                onDragEnd = onCardDragEnd,
-            )
+            if (drafts.isNotEmpty()) {
+                DraftReviewSection(
+                    cards = drafts,
+                    onApprove = onApproveCard,
+                    onReject = onRejectCard,
+                    onEdit = onEditCard,
+                )
+            }
+            if (approved.isNotEmpty()) {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Label("Approved (${approved.size})")
+                    // D4: drag-and-drop список. Long-press активирует drag; отпускание фиксирует порядок.
+                    DraggableCardList(
+                        cards = approved,
+                        onMoveCard = onMoveCard,
+                        onDragEnd = onCardDragEnd,
+                    )
+                }
+            }
         }
     }
 }

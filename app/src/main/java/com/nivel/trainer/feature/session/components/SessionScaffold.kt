@@ -79,6 +79,9 @@ internal fun SessionBody(
     onCompleteReview: () -> Unit,
     onMoveCard: (fromIndex: Int, toIndex: Int) -> Unit,
     onCardDragEnd: () -> Unit,
+    onApproveCard: (String) -> Unit,
+    onRejectCard: (String) -> Unit,
+    onEditCard: (com.nivel.trainer.domain.InsightCard) -> Unit,
 ) {
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -105,6 +108,9 @@ internal fun SessionBody(
                 onOpenLibrary = onOpenLibrary,
                 onMoveCard = onMoveCard,
                 onCardDragEnd = onCardDragEnd,
+                onApproveCard = onApproveCard,
+                onRejectCard = onRejectCard,
+                onEditCard = onEditCard,
             )
         }
         // D5 (#23): кнопка «Завершить разбор» — завершает цикл ревью тренера.

@@ -480,6 +480,26 @@ data class InsightsErrorResponse(
 )
 
 // -----------------------------------------------------------------------------
+// A2 (#96) — ревью draft-карточек: одобрить / отклонить / редактировать.
+// Контракт сверен по route-файлам NIVEL: cards/[id]/approve, cards/[id]/reject,
+// cards/[id] PATCH (core: setAiCardTrainerStatusCore, updateAiInsightCardCore,
+// validateAiInsightCardPatch). approve/reject — без тела; ответ всех трёх — { ok }.
+// -----------------------------------------------------------------------------
+
+/**
+ * Тело PATCH /api/v1/cards/{id} — правка контента карточки. `side` опционально
+ * (защита/атака). Валидация на сервере: title непустой ≤80, body непустой ≤400,
+ * tag из набора тем, side из набора сторон (ошибка → 400 { error }).
+ */
+@Serializable
+data class UpdateCardRequest(
+    val title: String,
+    val body: String,
+    val tag: String,
+    val side: String? = null,
+)
+
+// -----------------------------------------------------------------------------
 // D1 (#19) — транскрипт тренировки (просмотр, выгрузка).
 // Контракт сверен по веб-эталону NIVEL (src/app/sessions/[id]/transcript/page.tsx
 // + TranscriptView.tsx) и таблице transcripts (миграция 010_session_transcripts).

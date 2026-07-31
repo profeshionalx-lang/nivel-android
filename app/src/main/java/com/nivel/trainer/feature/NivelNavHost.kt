@@ -10,6 +10,9 @@ import androidx.navigation.compose.composable
 import androidx.navigation.navArgument
 import com.nivel.trainer.feature.auth.LoginScreen
 import com.nivel.trainer.feature.auth.SplashScreen
+import com.nivel.trainer.feature.frames.FrameScrubberResultKeys
+import com.nivel.trainer.feature.frames.FrameScrubberScreen
+import com.nivel.trainer.feature.frames.FrameSlot
 import com.nivel.trainer.feature.home.HomeScreen
 import com.nivel.trainer.feature.home.StudentsListScreen
 import com.nivel.trainer.feature.library.LibraryScreen
@@ -45,6 +48,17 @@ object NivelRoutes {
     /** Экран записи тренировки (C2). Аргумент — id сессии (см. SESSION_ARG). */
     const val RECORD = "sessions/{$SESSION_ARG}/record"
     fun record(sessionId: String) = "sessions/$sessionId/record"
+
+    /**
+     * Экран скрабера кадра (A6, #100). Аргументы — id сессии (см. SESSION_ARG), id
+     * карточки и слот (`before`/`after`, см. [FrameSlot.routeValue]). Веб-эталона нет
+     * (скрабера в вебе не будет, см. NIVEL#235) — маршрут согласован владельцем.
+     */
+    const val CARD_ARG = "cardId"
+    const val SLOT_ARG = "slot"
+    const val FRAME = "sessions/{$SESSION_ARG}/frame/{$CARD_ARG}/{$SLOT_ARG}"
+    fun frame(sessionId: String, cardId: String, slot: FrameSlot) =
+        "sessions/$sessionId/frame/$cardId/${slot.routeValue}"
 }
 
 /**
@@ -194,6 +208,39 @@ fun NivelNavHost(
             TranscriptScreen(
                 sessionId = sessionId,
                 onBack = { navController.popBackStack() },
+            )
+        }
+
+        // A6 (#100) — скрабер: тренер тапом фиксирует точный кадр удара в окне
+        // [-8с…+2с] от момента карточки. Результат кладём в savedStateHandle
+        // предыдущей записи бэкстека — по нему же A8 (#102) заберёт JPEG+время,
+        // когда добавит вызов этого экрана со слотов карточки; сам A6 вызывающей
+        // стороны ещё не содержит (см. `## Отклонения от плана` в PR).
+        composable(
+            route = NivelRoutes.FRAME,
+            arguments = listOf(
+                navArgument(NivelRoutes.SESSION_ARG) { type = NavType.StringType },
+                navArgument(NivelRoutes.CARD_ARG) { type = NavType.StringType },
+                navArgument(NivelRoutes.SLOT_ARG) { type = NavType.StringType },
+            ),
+        ) { backStackEntry ->
+            val sessionId = backStackEntry.arguments?.getString(NivelRoutes.SESSION_ARG).orEmpty()
+            val cardId = backStackEntry.arguments?.getString(NivelRoutes.CARD_ARG).orEmpty()
+            val slot = FrameSlot.fromRouteValue(backStackEntry.arguments?.getString(NivelRoutes.SLOT_ARG))
+            FrameScrubberScreen(
+                sessionId = sessionId,
+                cardId = cardId,
+                slot = slot,
+                onResult = { result ->
+                    navController.previousBackStackEntry?.savedStateHandle?.apply {
+                        set(FrameScrubberResultKeys.CARD_ID, result.cardId)
+                        set(FrameScrubberResultKeys.SLOT, result.slot.routeValue)
+                        set(FrameScrubberResultKeys.JPEG_PATH, result.jpegPath)
+                        set(FrameScrubberResultKeys.SELECTED_SECONDS, result.selectedSeconds)
+                    }
+                    navController.popBackStack()
+                },
+                onCancel = { navController.popBackStack() },
             )
         }
     }

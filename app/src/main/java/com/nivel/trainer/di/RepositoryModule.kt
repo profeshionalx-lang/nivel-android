@@ -18,6 +18,8 @@ import com.nivel.trainer.data.repository.StudentRepository
 import com.nivel.trainer.data.repository.TrainerOverviewRepository
 import com.nivel.trainer.data.repository.TranscriptRepository
 import com.nivel.trainer.data.repository.VideoCleanupRepository
+import com.nivel.trainer.feature.frames.FrameSourceFactory
+import com.nivel.trainer.feature.frames.MediaMetadataFrameSourceFactory
 import dagger.Binds
 import dagger.Module
 import dagger.hilt.InstallIn
@@ -77,4 +79,10 @@ abstract class RepositoryModule {
     @Binds
     @Singleton
     abstract fun bindVideoCleanupRepository(impl: DefaultVideoCleanupRepository): VideoCleanupRepository
+
+    // A6 (#100) — источник кадров видео для скрабера; интерфейс, чтобы ExoPlayer мог
+    // заменить `MediaMetadataRetriever`, если декод окажется слишком медленным (issue).
+    @Binds
+    @Singleton
+    abstract fun bindFrameSourceFactory(impl: MediaMetadataFrameSourceFactory): FrameSourceFactory
 }

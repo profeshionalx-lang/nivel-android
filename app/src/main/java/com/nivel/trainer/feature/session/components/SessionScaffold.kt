@@ -29,6 +29,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.nivel.trainer.domain.SessionDetail
 import com.nivel.trainer.domain.SessionOverview
+import com.nivel.trainer.feature.session.LocalVideoUiState
 import com.nivel.trainer.service.upload.UploadStage
 import java.time.OffsetDateTime
 import java.time.ZoneOffset
@@ -71,6 +72,7 @@ internal fun SessionBody(
     uploadStage: UploadStage,
     completingReview: Boolean,
     cards: List<com.nivel.trainer.domain.InsightCard>,
+    localVideo: LocalVideoUiState,
     onGenerate: () -> Unit,
     onOpenPaste: () -> Unit,
     onOpenLibrary: () -> Unit,
@@ -82,6 +84,8 @@ internal fun SessionBody(
     onApproveCard: (String) -> Unit,
     onRejectCard: (String) -> Unit,
     onEditCard: (com.nivel.trainer.domain.InsightCard) -> Unit,
+    onDeleteVideo: () -> Unit,
+    onDismissVideoError: () -> Unit,
 ) {
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -112,6 +116,17 @@ internal fun SessionBody(
                 onRejectCard = onRejectCard,
                 onEditCard = onEditCard,
             )
+        }
+        // A9 (#103): индикатор занятого места видео — только если есть локальный .mp4.
+        if (localVideo is LocalVideoUiState.Present) {
+            item {
+                VideoStorageSection(
+                    state = localVideo,
+                    isOrphan = overview.detail.trainerReviewCompleted,
+                    onDelete = onDeleteVideo,
+                    onDismissError = onDismissVideoError,
+                )
+            }
         }
         // D5 (#23): кнопка «Завершить разбор» — завершает цикл ревью тренера.
         item {
@@ -175,8 +190,8 @@ internal fun CenterBox(content: @Composable () -> Unit) {
 
 // --- Хелперы ---
 
-/** Русская локаль для дат (как `ru-RU` в вебе). */
-private val RuLocale = Locale("ru", "RU")
+/** Русская локаль для дат/чисел (как `ru-RU` в вебе). Также переиспользуется в A9 (#103) — форматирование размера видео. */
+internal val RuLocale = Locale("ru", "RU")
 
 /** Заголовок «Сессия N» (как в вебе); номер может отсутствовать. */
 internal fun headerTitle(detail: SessionDetail?): String {

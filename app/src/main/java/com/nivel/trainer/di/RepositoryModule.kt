@@ -8,6 +8,7 @@ import com.nivel.trainer.data.repository.DefaultStudentProfileRepository
 import com.nivel.trainer.data.repository.DefaultStudentRepository
 import com.nivel.trainer.data.repository.DefaultTrainerOverviewRepository
 import com.nivel.trainer.data.repository.DefaultTranscriptRepository
+import com.nivel.trainer.data.repository.DefaultVideoCleanupRepository
 import com.nivel.trainer.data.repository.InsightsRepository
 import com.nivel.trainer.data.repository.LibraryRepository
 import com.nivel.trainer.data.repository.SessionCollectionsRepository
@@ -16,6 +17,7 @@ import com.nivel.trainer.data.repository.StudentProfileRepository
 import com.nivel.trainer.data.repository.StudentRepository
 import com.nivel.trainer.data.repository.TrainerOverviewRepository
 import com.nivel.trainer.data.repository.TranscriptRepository
+import com.nivel.trainer.data.repository.VideoCleanupRepository
 import dagger.Binds
 import dagger.Module
 import dagger.hilt.InstallIn
@@ -70,4 +72,9 @@ abstract class RepositoryModule {
     abstract fun bindSessionCollectionsRepository(
         impl: DefaultSessionCollectionsRepository,
     ): SessionCollectionsRepository
+
+    // A9 (#103) — удаление локального видео («Завершить разбор» + ручное из индикатора места).
+    @Binds
+    @Singleton
+    abstract fun bindVideoCleanupRepository(impl: DefaultVideoCleanupRepository): VideoCleanupRepository
 }

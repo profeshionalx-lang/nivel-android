@@ -7,6 +7,8 @@ import com.nivel.trainer.data.repository.InsightsRepository
 import com.nivel.trainer.data.repository.InsightsResult
 import com.nivel.trainer.data.repository.SessionCollectionsRepository
 import com.nivel.trainer.data.repository.SessionDetailRepository
+import com.nivel.trainer.data.repository.VideoCleanupRepository
+import com.nivel.trainer.data.repository.VideoDeletionResult
 import com.nivel.trainer.domain.CardCollection
 import com.nivel.trainer.domain.CollectionCardPreview
 import com.nivel.trainer.domain.InsightCard
@@ -103,6 +105,42 @@ sealed interface LibrarySheetState {
 }
 
 /**
+ * A9 (#103): состояние локального видео тренировки на экране сессии — питает
+ * индикатор занятого места. `None` — видео не писали либо уже удалено (сирота
+ * убрана, ручное удаление прошло, или это аудио-сессия). `Present` — есть локальный
+ * `.mp4`: показываем размер, кнопку «Удалить» и, если сервер уже отметил разбор
+ * завершённым ([SessionDetailUiState] сама решает про isOrphan через `overview` —
+ * см. [SessionDetailContent]), подсказку убрать видео явно (не удаляем молча).
+ */
+sealed interface LocalVideoUiState {
+    data object None : LocalVideoUiState
+    data class Present(
+        val sizeBytes: Long,
+        val deleting: Boolean = false,
+        val error: String? = null,
+    ) : LocalVideoUiState
+}
+
+/** A9 (#103): зачем показано подтверждение удаления видео — что делать при «ОК». */
+enum class VideoDeleteIntent {
+    /** Юзер нажал «Завершить разбор», у сессии есть локальное видео. */
+    COMPLETE_REVIEW,
+
+    /** Ручное удаление из индикатора занятого места — разбор не завершается. */
+    MANUAL,
+}
+
+/**
+ * A9 (#103): подтверждение удаления видео (bottom-sheet, п.2/4 issue) — общее и для
+ * «Завершить разбор» (когда есть локальное видео), и для ручного удаления. [intent]
+ * определяет действие при подтверждении, [sizeBytes] — для текста предупреждения.
+ */
+sealed interface VideoDeleteConfirmState {
+    data object Closed : VideoDeleteConfirmState
+    data class Open(val sizeBytes: Long, val intent: VideoDeleteIntent) : VideoDeleteConfirmState
+}
+
+/**
  * UI-состояние экрана карточки тренировки (B6) + создание инсайтов (D2).
  * Без кэша: первый кадр — спиннер, дальше либо данные, либо ошибка с «Повторить».
  */
@@ -149,6 +187,10 @@ data class SessionDetailUiState(
      * с сервера — карточка возвращается в исходный статус, если действие не дошло.
      */
     val cardActionError: String? = null,
+    /** A9 (#103): локальное видео сессии — индикатор занятого места. */
+    val localVideo: LocalVideoUiState = LocalVideoUiState.None,
+    /** A9 (#103): открытое подтверждение удаления видео (см. [VideoDeleteConfirmState]). */
+    val videoDeleteConfirm: VideoDeleteConfirmState = VideoDeleteConfirmState.Closed,
 )
 
 /**
@@ -167,6 +209,7 @@ class SessionDetailViewModel @Inject constructor(
     private val uploadStatusObserver: UploadStatusObserver,
     private val uploadScheduler: AudioUploadScheduler,
     private val collectionsRepository: SessionCollectionsRepository,
+    private val videoCleanupRepository: VideoCleanupRepository,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(SessionDetailUiState())
@@ -182,7 +225,10 @@ class SessionDetailViewModel @Inject constructor(
     fun load(sessionId: String) {
         val isNewId = this.sessionId != sessionId
         this.sessionId = sessionId
-        if (isNewId) observeUpload(sessionId)
+        if (isNewId) {
+            observeUpload(sessionId)
+            observeVideo(sessionId)
+        }
         refresh()
     }
 
@@ -194,6 +240,33 @@ class SessionDetailViewModel @Inject constructor(
         viewModelScope.launch {
             uploadStatusObserver.observe(sessionId).collect { stage ->
                 _uiState.update { it.copy(uploadStage = stage) }
+            }
+        }
+    }
+
+    /**
+     * A9 (#103): подписка на локальное видео сессии (не Room — [VideoCleanupRepository]
+     * поверх [com.nivel.trainer.data.local.LocalVideoStore], DataStore). Живёт пока жив
+     * ViewModel — питает индикатор занятого места на экране.
+     *
+     * DataStore хранит видео ВСЕХ сессий в одном файле — `dataStore.data` переиздаёт
+     * весь снапшот при правке любой сессии (не только текущей). Поэтому здесь мержим
+     * только [LocalVideoUiState.Present.sizeBytes], сохраняя `deleting`/`error` —
+     * иначе побочная запись/удаление видео другой сессии могло бы молча погасить
+     * баннер ошибки текущей.
+     */
+    private fun observeVideo(sessionId: String) {
+        viewModelScope.launch {
+            videoCleanupRepository.observe(sessionId).collect { record ->
+                _uiState.update { state ->
+                    val size = record?.sizeBytes
+                    when {
+                        size == null -> state.copy(localVideo = LocalVideoUiState.None)
+                        state.localVideo is LocalVideoUiState.Present ->
+                            state.copy(localVideo = state.localVideo.copy(sizeBytes = size))
+                        else -> state.copy(localVideo = LocalVideoUiState.Present(sizeBytes = size))
+                    }
+                }
             }
         }
     }
@@ -313,14 +386,38 @@ class SessionDetailViewModel @Inject constructor(
      * Фиксирует финальное ревью тренера (D5, #23). Атомарный guard на сервере:
      * повторный тап когда `trainerReviewCompleted=true` — безопасный no-op.
      * При успехе перечитываем обзор — кнопка перейдёт в состояние «уже завершено».
+     *
+     * A9 (#103, п.1/2): если у сессии есть локальное видео — сначала показываем
+     * подтверждение с предупреждением о размере ([VideoDeleteConfirmState]) вместо
+     * немедленного вызова сервера; сам вызов и удаление продолжает [confirmVideoDelete].
+     * Порядок ([performCompleteReview]) важен: удаляем видео только ПОСЛЕ успешного
+     * ответа сервера — иначе при ошибке потеряем видео, а разбор останется незавершённым.
      */
     fun completeReview() {
-        val id = sessionId ?: return
         if (_uiState.value.completingReview) return
+        val localVideo = _uiState.value.localVideo
+        if (localVideo is LocalVideoUiState.Present) {
+            _uiState.update {
+                it.copy(
+                    videoDeleteConfirm = VideoDeleteConfirmState.Open(
+                        sizeBytes = localVideo.sizeBytes,
+                        intent = VideoDeleteIntent.COMPLETE_REVIEW,
+                    ),
+                )
+            }
+            return
+        }
+        performCompleteReview(deleteVideoAfter = false)
+    }
+
+    private fun performCompleteReview(deleteVideoAfter: Boolean) {
+        val id = sessionId ?: return
         _uiState.update { it.copy(completingReview = true, completeReviewError = null) }
         viewModelScope.launch {
             repository.completeReview(id)
                 .onSuccess {
+                    // A9: сервер подтвердил — теперь можно стереть локальный .mp4.
+                    if (deleteVideoAfter) deleteVideoInternal()
                     _uiState.update { it.copy(completingReview = false) }
                     refresh()
                 }
@@ -337,6 +434,70 @@ class SessionDetailViewModel @Inject constructor(
 
     fun dismissCompleteReviewError() {
         _uiState.update { it.copy(completeReviewError = null) }
+    }
+
+    // --- A9 (#103): удаление локального видео (по «Завершить разбор» или вручную) ---
+
+    /** Открывает подтверждение ручного удаления видео из индикатора занятого места. */
+    fun requestDeleteVideo() {
+        val localVideo = _uiState.value.localVideo as? LocalVideoUiState.Present ?: return
+        _uiState.update {
+            it.copy(
+                videoDeleteConfirm = VideoDeleteConfirmState.Open(
+                    sizeBytes = localVideo.sizeBytes,
+                    intent = VideoDeleteIntent.MANUAL,
+                ),
+            )
+        }
+    }
+
+    /** Подтверждение из bottom-sheet — продолжает то, ради чего его открыли ([VideoDeleteIntent]). */
+    fun confirmVideoDelete() {
+        val confirm = _uiState.value.videoDeleteConfirm as? VideoDeleteConfirmState.Open ?: return
+        _uiState.update { it.copy(videoDeleteConfirm = VideoDeleteConfirmState.Closed) }
+        when (confirm.intent) {
+            VideoDeleteIntent.COMPLETE_REVIEW -> performCompleteReview(deleteVideoAfter = true)
+            VideoDeleteIntent.MANUAL -> viewModelScope.launch { deleteVideoInternal() }
+        }
+    }
+
+    fun dismissVideoDeleteConfirm() {
+        _uiState.update { it.copy(videoDeleteConfirm = VideoDeleteConfirmState.Closed) }
+    }
+
+    /** Ошибка/блок предыдущей попытки удаления — закрыть баннер на индикаторе места. */
+    fun dismissVideoError() {
+        _uiState.update { state ->
+            val present = state.localVideo as? LocalVideoUiState.Present ?: return@update state
+            state.copy(localVideo = present.copy(error = null))
+        }
+    }
+
+    /**
+     * Собственно удаление: файл + запись [com.nivel.trainer.data.local.LocalVideoStore].
+     * Стоп-условие «незалитые кадры» (A7, п.3 issue) — внутри [VideoCleanupRepository];
+     * пока A7 не построен, реального стоп-условия ещё нет (см. `PendingFrameUploadsChecker`) —
+     * см. `## Отклонения от плана` в PR.
+     */
+    private suspend fun deleteVideoInternal() {
+        val id = sessionId ?: return
+        _uiState.update { state ->
+            val present = state.localVideo as? LocalVideoUiState.Present ?: return@update state
+            state.copy(localVideo = present.copy(deleting = true, error = null))
+        }
+        val cards = _uiState.value.overview?.cards.orEmpty()
+        when (val result = videoCleanupRepository.deleteVideo(id, cards)) {
+            VideoDeletionResult.Deleted, VideoDeletionResult.NothingToDelete ->
+                _uiState.update { it.copy(localVideo = LocalVideoUiState.None) }
+            is VideoDeletionResult.Blocked -> _uiState.update { state ->
+                val present = state.localVideo as? LocalVideoUiState.Present ?: return@update state
+                state.copy(localVideo = present.copy(deleting = false, error = result.reason))
+            }
+            is VideoDeletionResult.Failure -> _uiState.update { state ->
+                val present = state.localVideo as? LocalVideoUiState.Present ?: return@update state
+                state.copy(localVideo = present.copy(deleting = false, error = result.message))
+            }
+        }
     }
 
     // --- D4: drag-and-drop переупорядочивание карточек ---

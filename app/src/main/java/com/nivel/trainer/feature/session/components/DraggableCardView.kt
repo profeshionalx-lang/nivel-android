@@ -67,7 +67,12 @@ private fun CardView(card: InsightCard) {
  * перетащить. Содержимое идентично [CardView].
  */
 @Composable
-internal fun DraggableCardView(card: InsightCard, isDragged: Boolean, alpha: Float) {
+internal fun DraggableCardView(
+    card: InsightCard,
+    isDragged: Boolean,
+    alpha: Float,
+    frameActions: FrameSlotActions,
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -113,6 +118,9 @@ internal fun DraggableCardView(card: InsightCard, isDragged: Boolean, alpha: Flo
                     }
                 }
             }
+            // A8 (#102): ряд слотов кадров — как на драфте (DraftReviewSection), approved-
+            // карточка тоже даёт выбрать/заменить/убрать кадр, разбор не заканчивается на approve.
+            FrameSlotRow(card = card, actions = frameActions)
             // Статус-лейбл (черновик / approved).
             val statusColor = if (card.trainerStatus == "draft") Amber else OnSurfaceVariant
             val statusLabel = if (card.trainerStatus == "draft") "ЧЕРНОВИК" else "APPROVED"

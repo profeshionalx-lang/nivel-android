@@ -41,6 +41,7 @@ private val SwipeThreshold = 96.dp
 @Composable
 internal fun DraftReviewSection(
     cards: List<InsightCard>,
+    frameActions: FrameSlotActions,
     onApprove: (String) -> Unit,
     onReject: (String) -> Unit,
     onEdit: (InsightCard) -> Unit,
@@ -56,7 +57,13 @@ internal fun DraftReviewSection(
             letterSpacing = 2.sp,
         )
 
-        DraftCardStack(top = top, next = cards.getOrNull(1), onApprove = onApprove, onReject = onReject)
+        DraftCardStack(
+            top = top,
+            next = cards.getOrNull(1),
+            frameActions = frameActions,
+            onApprove = onApprove,
+            onReject = onReject,
+        )
 
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             ReviewActionButton(
@@ -97,6 +104,7 @@ internal fun DraftReviewSection(
 private fun DraftCardStack(
     top: InsightCard,
     next: InsightCard?,
+    frameActions: FrameSlotActions,
     onApprove: (String) -> Unit,
     onReject: (String) -> Unit,
 ) {
@@ -106,6 +114,7 @@ private fun DraftCardStack(
         next?.let { peek ->
             DraftCardFace(
                 card = peek,
+                frameActions = frameActions,
                 modifier = Modifier
                     .fillMaxWidth()
                     .graphicsLayer {
@@ -117,6 +126,7 @@ private fun DraftCardStack(
         }
         DraftCardFace(
             card = top,
+            frameActions = frameActions,
             modifier = Modifier
                 .fillMaxWidth()
                 .graphicsLayer {
@@ -144,7 +154,7 @@ private fun DraftCardStack(
 
 /** Лицо черновик-карточки: бейдж «AI черновик» + тема, заголовок, тело, цитата. */
 @Composable
-private fun DraftCardFace(card: InsightCard, modifier: Modifier = Modifier) {
+private fun DraftCardFace(card: InsightCard, frameActions: FrameSlotActions, modifier: Modifier = Modifier) {
     Column(
         modifier = modifier
             .background(SurfaceCard, RoundedCornerShape(20.dp))
@@ -177,7 +187,7 @@ private fun DraftCardFace(card: InsightCard, modifier: Modifier = Modifier) {
             Text(text = "«$it»", color = OnSurfaceVariant, fontSize = 12.sp, fontStyle = FontStyle.Italic)
         }
         // Порядок как в вебе (`AiInsightCard`): заголовок → тело → цитата → кадры.
-        InsightFrameThumbnails(card)
+        FrameSlotRow(card = card, actions = frameActions)
     }
 }
 

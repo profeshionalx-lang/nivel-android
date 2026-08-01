@@ -25,18 +25,16 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 
-/** Один кадр плёнки-превью — время в видео (мс) + уже уменьшенный bitmap, готовый к рисованию. */
-data class FilmstripFrame(val videoTimeMs: Long, val bitmap: Bitmap)
-
 /**
- * Кадр из предварительного разбора окна (issue #117) — время в видео (мс) + сжатый JPEG,
- * а не сырой [Bitmap]. Окно даёт ~50-100 таких кадров (шаг [MediaMetadataFrameSource]'а —
- * 100мс) — сырыми `Bitmap` (даже в `RGB_565`) это десятки мегабайт, JPEG держит тот же
- * кэш в единицах мегабайт ценой decode на ~1мс при показе (см. [decode]).
+ * Один кадр окна (#117, финальная версия) — время в видео (мс) + готовый к рисованию `Bitmap`
+ * в `RGB_565` (вдвое компактнее `ARGB_8888`, альфа-канал кадру видео не нужен). Владелец решил,
+ * что точность до кадра не нужна («в рамках полсекунды нормально») — весь список из
+ * `FrameWindow.TARGET_FRAME_COUNT` кадров держится в памяти целиком (см. [FrameWindow.scanStepMs]:
+ * ~20 кадров × ~1МБ на `540px`-ширине — единицы, не десятки мегабайт), и служит ОДНОВременно
+ * и плёнкой миниатюр, и позициями слайдера — слайдер просто индексирует список, ничего не
+ * декодируя на движение.
  */
-class CachedScrubFrame(val timeMs: Long, private val jpeg: ByteArray) {
-    fun decode(): Bitmap? = BitmapFactory.decodeByteArray(jpeg, 0, jpeg.size)
-}
+data class FilmstripFrame(val videoTimeMs: Long, val bitmap: Bitmap)
 
 /**
  * Откуда брать байты видео (A10, #115) — записанное приложением видео лежит File-путём
@@ -62,31 +60,30 @@ interface FrameSource {
     /**
      * Разбирает окно `[startMs, endMs]` ОДНИМ линейным проходом декодера с шагом [stepMs] —
      * без единой независимой перемотки внутри окна. [onFrame] зовётся по мере готовности
-     * каждого кадра — экран строит плёнку и получает мгновенный плейсхолдер для скраба
-     * прогрессивно, не дожидаясь конца прохода. Кооперативно отменяемо (см. класс-докблок
-     * [FrameScrubberViewModel]) — цикл декодера ограничен таймаутом на итерацию, поэтому
-     * отмена не залипает на блокирующем нативном вызове.
+     * каждого кадра — экран строит плёнку прогрессивно, не дожидаясь конца прохода.
+     * Кооперативно отменяемо (см. класс-докблок [FrameScrubberViewModel]) — цикл декодера
+     * ограничен таймаутом на итерацию, поэтому отмена не залипает на блокирующем нативном
+     * вызове.
      *
      * Почему не N вызовов `getFrameAtTime` (было до #117): дорога не распаковка кадра,
      * а именно ПЕРЕМОТКА — каждый независимый вызов ищет опорный кадр и заново
      * инициализирует сессию декодера. Линейный проход этого не делает вообще, поэтому
-     * окно в 10с разбирается за секунду-две, а не за N отдельных операций.
+     * окно разбирается за секунду, а не за N отдельных операций.
      */
     suspend fun scanWindow(
         startMs: Long,
         endMs: Long,
         stepMs: Long,
         targetWidthPx: Int,
-        onFrame: (CachedScrubFrame) -> Unit,
-    ): List<CachedScrubFrame>
+        onFrame: (FilmstripFrame) -> Unit,
+    ): List<FilmstripFrame>
 
     /**
      * Точный кадр на [timeMs] — `getFrameAtTime(OPTION_CLOSEST)` на отдельном инстансе
      * `MediaMetadataRetriever`, не связанном с [scanWindow] (issue #117: раньше плёнка и
      * точный кадр делили один ретривер под общим локом — отсюда очередь и вечный спиннер).
-     * Используется и для крупного превью после отпускания слайдера, и для итогового JPEG —
-     * один и тот же вызов, чтобы превью гарантированно совпадало с тем, что уедет в файл
-     * (acceptance issue #100).
+     * Единственное место, где кадр берётся честно (не из кэша [scanWindow]) — нажатие
+     * «Выбрать кадр»: там важна точность и полное разрешение, а не скорость.
      */
     suspend fun exactFrameAt(timeMs: Long): Bitmap?
 
@@ -100,18 +97,19 @@ interface FrameSource {
  * - [scanWindow] — `MediaExtractor` + `MediaCodec` decode-to-`Surface`, кадры читаются из
  *   `ImageReader` в формате `YUV_420_888` (единственный формат, который MediaCodec гарантированно
  *   умеет рендерить в `ImageReader` без GPU/`SurfaceTexture` — `RGBA_8888` для видео-декодера
- *   не гарантирован на уровне платформы). Кадр репакуется в NV21 и сразу кодируется в JPEG
- *   через `YuvImage` (никакой ручной YUV→RGB математики) — то же самое приведение, что и
- *   нужно для компактного кэша. Реальный шаг между кадрами — минимум [stepMs] (кадры
- *   декодера не подгоняются под сетку точно, шаг равен ближайшему кадру декодера ≥ tick).
- *   Ошибка/недоступный кодек на устройстве — не должны ронять экран: [scanWindow] ловит
- *   исключение и отдаёт то, что успело насканиться (может быть пустой список — экран это
- *   переживёт, просто без плёнки/кэша, точный кадр по-прежнему работает).
+ *   не гарантирован на уровне платформы). Кадр репакуется в NV21 и проводится через
+ *   `YuvImage`/JPEG как единственный безопасный путь YUV→RGB без ручной математики (см.
+ *   [imageToBitmap]) — итог хранится как `Bitmap`, не JPEG: при ~20 кадрах на окно память уже
+ *   укладывается в бюджет и без второго сжатия, а два раунда JPEG (как было в первой версии
+ *   #117) были лишним риском ради экономии, которая тут не нужна.
+ *   Реальный шаг между кадрами — минимум [stepMs] (кадры декодера не подгоняются под сетку
+ *   точно, шаг равен ближайшему кадру декодера ≥ tick). Ошибка/недоступный кодек на
+ *   устройстве — не должны ронять экран: [scanWindow] ловит исключение и отдаёт то, что
+ *   успело насканиться (может быть пустой список — экран это переживёт, просто без плёнки,
+ *   точный кадр по-прежнему работает).
  * - [exactFrameAt] — как в #100, `MediaMetadataRetriever.getFrameAtTime(OPTION_CLOSEST)` на
  *   ОТДЕЛЬНОМ инстансе ретривера — не имеет общих ресурсов с [scanWindow], поэтому не может
  *   встать в очередь за ним (issue #117, причина №1).
- * - Высота превью считается из реальных width/height/rotation видео (метаданные ретривера),
- *   а не захардкожена — иначе кадр исказится на нестандартном соотношении сторон.
  */
 class MediaMetadataFrameSource(
     private val source: FrameVideoSource,
@@ -140,16 +138,16 @@ class MediaMetadataFrameSource(
         endMs: Long,
         stepMs: Long,
         targetWidthPx: Int,
-        onFrame: (CachedScrubFrame) -> Unit,
-    ): List<CachedScrubFrame> = withContext(Dispatchers.IO) {
+        onFrame: (FilmstripFrame) -> Unit,
+    ): List<FilmstripFrame> = withContext(Dispatchers.IO) {
         if (!prepared || stepMs <= 0 || endMs < startMs) return@withContext emptyList()
         try {
             linearScan(startMs, endMs, stepMs, targetWidthPx, onFrame)
         } catch (e: CancellationException) {
-            // ВАЖНО: не глотать отмену — `runCatching`/`catch (e: Exception)` ловит и её тоже,
-            // из-за чего отменённый scanJob не переставал бы выполняться (он просто "успешно"
-            // возвращал бы пустой список и продолжал жить дальше как будто ничего не случилось —
-            // ровно тот баг с зависшей отменой, который #117 и должен был исправить).
+            // ВАЖНО: не глотать отмену — `catch (e: Exception)` ниже ловит и её тоже, из-за
+            // чего отменённый scanJob не переставал бы выполняться (он просто "успешно"
+            // возвращал бы пустой список и продолжал жить дальше как будто ничего не
+            // случилось — ровно тот баг с зависшей отменой, который #117 и исправляет).
             throw e
         } catch (e: Exception) {
             // Битый файл/недоступный кодек на устройстве — не роняем экран, отдаём то, что успели.
@@ -162,9 +160,9 @@ class MediaMetadataFrameSource(
         endMs: Long,
         stepMs: Long,
         targetWidthPx: Int,
-        onFrame: (CachedScrubFrame) -> Unit,
-    ): List<CachedScrubFrame> {
-        val results = mutableListOf<CachedScrubFrame>()
+        onFrame: (FilmstripFrame) -> Unit,
+    ): List<FilmstripFrame> {
+        val results = mutableListOf<FilmstripFrame>()
         val extractor = MediaExtractor()
         var codec: MediaCodec? = null
         var reader: ImageReader? = null
@@ -248,8 +246,8 @@ class MediaMetadataFrameSource(
                     mediaCodec.releaseOutputBuffer(outIndex, shouldRender)
                     if (shouldRender) {
                         acquireImageWithRetry(requireNotNull(reader))?.use { image ->
-                            imageToJpeg(image, rotationDegrees, targetWidthPx)?.let { jpeg ->
-                                val frame = CachedScrubFrame(presentationUs / 1_000, jpeg)
+                            imageToBitmap(image, rotationDegrees, targetWidthPx)?.let { bitmap ->
+                                val frame = FilmstripFrame(presentationUs / 1_000, bitmap)
                                 results += frame
                                 onFrame(frame)
                             }
@@ -300,32 +298,31 @@ class MediaMetadataFrameSource(
     }
 }
 
-private const val INTERMEDIATE_JPEG_QUALITY = 90
-private const val SCAN_JPEG_QUALITY = 70
+private const val NV21_JPEG_QUALITY = 90
 
 /**
- * `YUV_420_888` → NV21 → JPEG (через `YuvImage`, без ручной YUV→RGB математики) → decode →
- * поворот по метаданным трека → уменьшение до [targetWidthPx] → JPEG кэша. Двойное
- * JPEG-кодирование (полный размер, затем уменьшенный) — сознательный компромисс: `YuvImage`
- * не умеет отдавать сразу уменьшенный кадр, а перекодирование маленькой картинки — доли
- * миллисекунды, не узкое место на фоне самого декода.
+ * `YUV_420_888` → NV21 → JPEG (через `YuvImage`, без ручной YUV→RGB математики; `YuvImage` не
+ * умеет отдавать `Bitmap` напрямую, JPEG-кодек тут используется только как готовый конвертер
+ * цветового пространства) → decode → поворот по метаданным трека → уменьшение до
+ * [targetWidthPx] → перевод в `RGB_565` (вдвое компактнее хранимого по умолчанию `ARGB_8888`,
+ * альфа кадру видео не нужна).
  */
-private fun imageToJpeg(image: Image, rotationDegrees: Int, targetWidthPx: Int): ByteArray? {
+private fun imageToBitmap(image: Image, rotationDegrees: Int, targetWidthPx: Int): Bitmap? {
     val nv21 = yuv420888ToNv21(image) ?: return null
-    val fullJpeg = ByteArrayOutputStream()
+    val jpeg = ByteArrayOutputStream()
     val yuvImage = YuvImage(nv21, ImageFormat.NV21, image.width, image.height, null)
-    if (!yuvImage.compressToJpeg(Rect(0, 0, image.width, image.height), INTERMEDIATE_JPEG_QUALITY, fullJpeg)) return null
-    val fullBitmap = runCatching {
-        BitmapFactory.decodeByteArray(fullJpeg.toByteArray(), 0, fullJpeg.size())
+    if (!yuvImage.compressToJpeg(Rect(0, 0, image.width, image.height), NV21_JPEG_QUALITY, jpeg)) return null
+    val decoded = runCatching {
+        BitmapFactory.decodeByteArray(jpeg.toByteArray(), 0, jpeg.size())
     }.getOrNull() ?: return null
 
     val rotated = if (rotationDegrees != 0) {
         val matrix = Matrix().apply { postRotate(rotationDegrees.toFloat()) }
-        Bitmap.createBitmap(fullBitmap, 0, 0, fullBitmap.width, fullBitmap.height, matrix, true).also {
-            if (it !== fullBitmap) fullBitmap.recycle()
+        Bitmap.createBitmap(decoded, 0, 0, decoded.width, decoded.height, matrix, true).also {
+            if (it !== decoded) decoded.recycle()
         }
     } else {
-        fullBitmap
+        decoded
     }
 
     val targetHeight = (rotated.height.toDouble() / rotated.width * targetWidthPx).roundToInt().coerceAtLeast(1)
@@ -337,10 +334,9 @@ private fun imageToJpeg(image: Image, rotationDegrees: Int, targetWidthPx: Int):
         }
     }
 
-    val out = ByteArrayOutputStream()
-    scaled.compress(Bitmap.CompressFormat.JPEG, SCAN_JPEG_QUALITY, out)
-    scaled.recycle()
-    return out.toByteArray()
+    val compact = scaled.copy(Bitmap.Config.RGB_565, false)
+    if (compact !== scaled) scaled.recycle()
+    return compact
 }
 
 /**

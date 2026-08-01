@@ -50,7 +50,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.nivel.trainer.ui.state.EmptyStateView
-import kotlin.math.roundToLong
+import kotlin.math.roundToInt
 
 // Цвета — один-в-один из веб-Nivel (globals.css), как на остальных экранах приложения.
 private val Background = Color(0xFF0E0E0E)
@@ -102,8 +102,7 @@ fun FrameScrubberScreen(
                 state = current,
                 slotLabel = if (slot == FrameSlot.BEFORE) "до" else "после",
                 onThumbnailSelected = viewModel::onThumbnailSelected,
-                onSliderDragging = { viewModel.onSliderDragging(it.roundToLong()) },
-                onSliderReleased = { viewModel.onSliderReleased(it.roundToLong()) },
+                onSliderIndexChanged = { viewModel.onSliderIndexChanged(it.roundToInt()) },
                 onExpandWindow = viewModel::onExpandWindow,
                 onCancel = onCancel,
                 onConfirm = {
@@ -143,9 +142,8 @@ private fun BlockingMessage(glyph: String, message: String, onCancel: () -> Unit
 private fun ReadyContent(
     state: FrameScrubberUiState.Ready,
     slotLabel: String,
-    onThumbnailSelected: (Long) -> Unit,
-    onSliderDragging: (Float) -> Unit,
-    onSliderReleased: (Float) -> Unit,
+    onThumbnailSelected: (Int) -> Unit,
+    onSliderIndexChanged: (Float) -> Unit,
     onExpandWindow: () -> Unit,
     onCancel: () -> Unit,
     onConfirm: () -> Unit,
@@ -169,8 +167,9 @@ private fun ReadyContent(
             )
         }
 
-        // Крупное превью текущего выбора — точный кадр (OPTION_CLOSEST), тот же вызов,
-        // что уйдёт в итоговый JPEG (см. FrameScrubberViewModel.onConfirm).
+        // Крупное превью текущего выбора — кадр из уже разобранного окна (#117: слайдер
+        // листает готовые кадры, ничего не декодируя). Честный OPTION_CLOSEST — только в
+        // итоговом JPEG при «Выбрать кадр» (см. FrameScrubberViewModel.onConfirm).
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -180,15 +179,15 @@ private fun ReadyContent(
                 .background(SurfaceCard),
             contentAlignment = Alignment.Center,
         ) {
-            state.previewBitmap?.let { bmp ->
+            val preview = state.previewBitmap
+            if (preview != null) {
                 Image(
-                    bitmap = bmp.asImageBitmap(),
+                    bitmap = preview.asImageBitmap(),
                     contentDescription = null,
                     contentScale = ContentScale.Fit,
                     modifier = Modifier.fillMaxSize(),
                 )
-            }
-            if (state.previewLoading) {
+            } else if (state.buildingFilmstrip) {
                 CircularProgressIndicator(color = Primary, modifier = Modifier.size(28.dp))
             }
         }
@@ -204,11 +203,16 @@ private fun ReadyContent(
         )
 
         Spacer(Modifier.size(8.dp))
+        // Дискретный слайдер (#117: точность до кадра не нужна, «в рамках полсекунды
+        // нормально») — value/valueRange/steps индексируют state.frames, не миллисекунды
+        // видео; листание ничего не декодирует, поэтому спиннер тут не нужен.
+        val lastIndex = (state.frames.size - 1).coerceAtLeast(0)
         Slider(
-            value = state.selectedTimeMs.toFloat(),
-            onValueChange = onSliderDragging,
-            onValueChangeFinished = { onSliderReleased(state.selectedTimeMs.toFloat()) },
-            valueRange = state.windowStartMs.toFloat()..state.windowEndMs.coerceAtLeast(state.windowStartMs + 1).toFloat(),
+            value = state.selectedIndex.toFloat(),
+            onValueChange = onSliderIndexChanged,
+            valueRange = 0f..lastIndex.toFloat(),
+            steps = (lastIndex - 1).coerceAtLeast(0),
+            enabled = state.frames.size > 1,
             colors = SliderDefaults.colors(thumbColor = Primary, activeTrackColor = Primary, inactiveTrackColor = BorderDim),
             modifier = Modifier
                 .fillMaxWidth()
@@ -236,7 +240,7 @@ private fun ReadyContent(
                 )
             }
         }
-        if (state.filmstrip.isNotEmpty()) {
+        if (state.frames.isNotEmpty()) {
             val listState = rememberLazyListState()
             LazyRow(
                 state = listState,
@@ -247,15 +251,15 @@ private fun ReadyContent(
                     .fillMaxWidth()
                     .padding(vertical = 4.dp),
             ) {
-                itemsIndexed(state.filmstrip, key = { _, frame -> frame.videoTimeMs }) { _, frame ->
-                    val selected = frame.videoTimeMs == state.selectedTimeMs
+                itemsIndexed(state.frames, key = { _, frame -> frame.videoTimeMs }) { index, frame ->
+                    val selected = index == state.selectedIndex
                     Box(
                         modifier = Modifier
                             .heightIn(min = TouchTarget)
                             .width(ThumbnailWidth)
                             .clip(RoundedCornerShape(8.dp))
                             .background(if (selected) Primary.copy(alpha = 0.2f) else SurfaceCard)
-                            .clickable { onThumbnailSelected(frame.videoTimeMs) },
+                            .clickable { onThumbnailSelected(index) },
                         contentAlignment = Alignment.Center,
                     ) {
                         Image(
@@ -299,7 +303,7 @@ private fun ReadyContent(
             }
             Button(
                 onClick = onConfirm,
-                enabled = !state.saving && state.previewBitmap != null,
+                enabled = !state.saving && state.frames.isNotEmpty(),
                 modifier = Modifier
                     .weight(2f)
                     .heightIn(min = TouchTarget),
@@ -321,11 +325,15 @@ private fun ReadyContent(
     }
 }
 
-/** `мм:сс.ссс` — точность до миллисекунд важна на быстром движении (issue: ошибка в 250мс видна по ракетке). */
+/**
+ * `мм:сс,д` (десятые доли) — владелец решил, что точность до кадра не нужна («в рамках
+ * полсекунды нормально», #117), сетка позиций — 500мс и крупнее, показывать миллисекунды
+ * было бы обманчивой точностью.
+ */
 private fun formatTimestamp(timeMs: Long): String {
     val totalMs = timeMs.coerceAtLeast(0)
     val minutes = totalMs / 60_000
     val seconds = (totalMs % 60_000) / 1_000
-    val millis = totalMs % 1_000
-    return "%02d:%02d.%03d".format(minutes, seconds, millis)
+    val tenths = (totalMs % 1_000) / 100
+    return "%02d:%02d,%d".format(minutes, seconds, tenths)
 }

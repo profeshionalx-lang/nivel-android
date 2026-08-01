@@ -46,6 +46,15 @@ sealed interface FrameScrubberUiState {
         val previewLoading: Boolean = false,
         val expanded: Boolean = false,
         val saving: Boolean = false,
+        /**
+         * Ошибка сохранения кадра (декод/диск) — fix «после загрузки не сохраняется
+         * выбранный кадр»: раньше [onConfirm] звал `onError` колбэком экрана, который
+         * НИЧЕГО не делал (см. старый `FrameScrubberScreen.onConfirm { onError = {} }`),
+         * тренер тапал «Выбрать кадр», ошибка проглатывалась молча, кадр не сохранялся
+         * и экран выглядел так, будто ничего не произошло. Теперь ошибка — часть
+         * состояния, экран обязан её показать ([com.nivel.trainer.ui.state.ErrorBanner]).
+         */
+        val saveError: String? = null,
     ) : FrameScrubberUiState
 }
 
@@ -192,7 +201,8 @@ class FrameScrubberViewModel @Inject constructor(
     private fun selectTime(timeMs: Long) {
         val ready = _state.value as? FrameScrubberUiState.Ready ?: return
         val clamped = timeMs.coerceIn(ready.windowStartMs, ready.windowEndMs)
-        _state.value = ready.copy(selectedTimeMs = clamped)
+        // Новый выбор кадра — прошлая ошибка сохранения больше не актуальна.
+        _state.value = ready.copy(selectedTimeMs = clamped, saveError = null)
         requestPreview(clamped)
     }
 
@@ -215,23 +225,39 @@ class FrameScrubberViewModel @Inject constructor(
      * стороне и сохраняет JPEG q=85 в `cacheDir/frames/`. Результат отдаётся [onResult] —
      * экран сам решает, что делать дальше (в NavHost — положить в savedStateHandle и
      * закрыть экран); заливка на сервер сюда не входит (A7, #101).
+     *
+     * Fix «после загрузки не сохраняется выбранный кадр»: раньше сюда передавался
+     * `onError` колбэк, который экран передавал пустым (`onError = {}`) — любая ошибка
+     * декода/диска проглатывалась молча. Ошибка теперь пишется в [FrameScrubberUiState.Ready.saveError]
+     * самим VM ([dismissSaveError] его сбрасывает) — экран обязан её отрисовать.
+     *
+     * Также раньше все `_state.value = ready.copy(...)` в этой функции применялись
+     * поверх [ready] — снимка состояния, захваченного ДО начала корутины. Если за время
+     * декода/записи на диск (`withContext(Dispatchers.IO)`) плёнка или превью успевали
+     * обновиться (см. [openWindow]/[requestPreview]), этот код тихо откатывал их — экран
+     * на миг «терял» уже построенные кадры плёнки. Заменено на [MutableStateFlow.update]
+     * поверх ТЕКУЩЕГО состояния.
      */
-    fun onConfirm(cardId: String, slot: FrameSlot, onResult: (FrameSelectionResult) -> Unit, onError: (String) -> Unit) {
+    fun onConfirm(cardId: String, slot: FrameSlot, onResult: (FrameSelectionResult) -> Unit) {
         val ready = _state.value as? FrameScrubberUiState.Ready ?: return
         val source = frameSource ?: return
         if (ready.saving) return
-        _state.value = ready.copy(saving = true)
+        _state.update { (it as? FrameScrubberUiState.Ready ?: return@update it).copy(saving = true, saveError = null) }
         viewModelScope.launch {
             val bitmap = ready.previewBitmap ?: source.exactFrameAt(ready.selectedTimeMs)
             if (bitmap == null) {
-                _state.value = ready.copy(saving = false)
-                onError("Не удалось получить кадр. Попробуйте другой момент.")
+                _state.update {
+                    (it as? FrameScrubberUiState.Ready ?: return@update it)
+                        .copy(saving = false, saveError = "Не удалось получить кадр. Попробуйте другой момент.")
+                }
                 return@launch
             }
             val savedPath = withContext(Dispatchers.IO) { saveJpeg(bitmap) }
             if (savedPath == null) {
-                _state.value = ready.copy(saving = false)
-                onError("Не удалось сохранить кадр на телефоне.")
+                _state.update {
+                    (it as? FrameScrubberUiState.Ready ?: return@update it)
+                        .copy(saving = false, saveError = "Не удалось сохранить кадр на телефоне.")
+                }
                 return@launch
             }
             val moment = momentSeconds
@@ -243,9 +269,14 @@ class FrameScrubberViewModel @Inject constructor(
             } else {
                 ready.selectedTimeMs / 1_000.0
             }
-            _state.value = ready.copy(saving = false)
+            _state.update { (it as? FrameScrubberUiState.Ready ?: return@update it).copy(saving = false) }
             onResult(FrameSelectionResult(cardId = cardId, slot = slot, jpegPath = savedPath, selectedSeconds = selectedSeconds))
         }
+    }
+
+    /** Закрыть баннер ошибки сохранения кадра (крестик на [com.nivel.trainer.ui.state.ErrorBanner]). */
+    fun dismissSaveError() {
+        _state.update { (it as? FrameScrubberUiState.Ready ?: return@update it).copy(saveError = null) }
     }
 
     /** [VideoRecord] → [FrameVideoSource] по источнику (A10, #115); `null` — данных не хватает (не должно случиться). */

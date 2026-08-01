@@ -46,6 +46,13 @@ internal data class FrameSlotActions(
     val onPick: (cardId: String, slot: FrameSlot) -> Unit,
     val onRemove: (cardId: String, slot: FrameSlot) -> Unit,
     val onRetry: (cardId: String, slot: FrameSlot) -> Unit,
+    /**
+     * Шаг 6 (опционально): «протухший» signed-URL из Room-кэша рендерится Coil'ом как
+     * пустой слот (см. `urlBroken` в [FrameSlotBox]) — тап должен перечитать обзор
+     * сессии с сервера, чтобы получить свежий `frame_*_url`, а не молча остаться пустым.
+     * По умолчанию no-op — вызывающая сторона может не прокидывать (совместимость).
+     */
+    val onRefresh: () -> Unit = {},
 )
 
 /**
@@ -76,6 +83,7 @@ internal fun FrameSlotRow(
             onPick = { actions.onPick(card.id, FrameSlot.BEFORE) },
             onRemove = { actions.onRemove(card.id, FrameSlot.BEFORE) },
             onRetry = { actions.onRetry(card.id, FrameSlot.BEFORE) },
+            onRefresh = actions.onRefresh,
         )
         FrameSlotBox(
             modifier = Modifier.weight(1f),
@@ -87,6 +95,7 @@ internal fun FrameSlotRow(
             onPick = { actions.onPick(card.id, FrameSlot.AFTER) },
             onRemove = { actions.onRemove(card.id, FrameSlot.AFTER) },
             onRetry = { actions.onRetry(card.id, FrameSlot.AFTER) },
+            onRefresh = actions.onRefresh,
         )
     }
 }
@@ -101,6 +110,7 @@ private fun FrameSlotBox(
     onPick: () -> Unit,
     onRemove: () -> Unit,
     onRetry: () -> Unit,
+    onRefresh: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     var urlBroken by remember(frameUrl) { mutableStateOf(false) }
@@ -145,6 +155,43 @@ private fun FrameSlotBox(
                         )
                     }
                 }
+                // Подпись «До»/«После» отсутствовала в этой ветке — слот с провалившейся
+                // заливкой выглядел «безымянным» среди остальных (fix «после загрузки не
+                // сохраняется выбранный кадр», причина C).
+                SlotCaption(text = label, modifier = Modifier.align(Alignment.BottomStart))
+            }
+
+            // Заливка подтверждена сервером (WorkManager Done), но карточка ещё не
+            // перечитана — свежий frame_*_url ещё не пришёл (см. awaitFrameUrl в
+            // SessionDetailViewModel). Без этой ветки слот на несколько секунд
+            // выглядел как «пусто, можно выбрать» — тренер думал, что кадр потерялся.
+            stage is UploadStage.Done && effectiveUrl == null -> {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator(color = Primary, modifier = Modifier.size(28.dp))
+                }
+                SlotCaption(text = "Сохраняем…", modifier = Modifier.align(Alignment.BottomStart))
+            }
+
+            // Шаг 6: URL был, но не загрузился (протухший signed-URL из Room-кэша) —
+            // отличаем от «кадра никогда не было»: тап перечитывает обзор с сервера.
+            frameUrl != null && urlBroken -> {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .clickable(onClick = onRefresh),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("⟳", color = Primary, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                        Text(
+                            text = "Кадр не загрузился — обновить",
+                            color = OnSurfaceVariant,
+                            fontSize = 11.sp,
+                            textAlign = TextAlign.Center,
+                        )
+                    }
+                }
+                SlotCaption(text = label, modifier = Modifier.align(Alignment.BottomStart))
             }
 
             // Кадр уже приложен и подтверждён сервером — миниатюра + заменить/убрать.

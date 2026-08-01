@@ -50,6 +50,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.nivel.trainer.ui.state.EmptyStateView
+import com.nivel.trainer.ui.state.ErrorBanner
 import kotlin.math.roundToLong
 
 // Цвета — один-в-один из веб-Nivel (globals.css), как на остальных экранах приложения.
@@ -105,18 +106,15 @@ fun FrameScrubberScreen(
                 onSliderChanged = { viewModel.onSliderChanged(it.roundToLong()) },
                 onExpandWindow = viewModel::onExpandWindow,
                 onCancel = onCancel,
-                onConfirm = {
-                    viewModel.onConfirm(
-                        cardId = cardId,
-                        slot = slot,
-                        onResult = onResult,
-                        // Ошибка сохранения — редкий случай (диск/декод); экран просто
-                        // возвращает saving=false и тренер может попробовать ещё раз
-                        // (полноценный тост/снекбар — не в acceptance A6).
-                        onError = {},
-                    )
-                },
+                onConfirm = { viewModel.onConfirm(cardId = cardId, slot = slot, onResult = onResult) },
             )
+        }
+
+        // Ошибка сохранения кадра (декод/диск) — раньше проглатывалась молча (fix
+        // «после загрузки не сохраняется выбранный кадр»), теперь видна тренеру.
+        val current = state
+        if (current is FrameScrubberUiState.Ready && current.saveError != null) {
+            ErrorBanner(message = current.saveError, onDismiss = viewModel::dismissSaveError)
         }
     }
 }

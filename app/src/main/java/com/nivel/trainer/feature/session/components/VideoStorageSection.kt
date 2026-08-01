@@ -24,6 +24,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.nivel.trainer.data.local.VideoSource
 import com.nivel.trainer.feature.session.LocalVideoUiState
 import com.nivel.trainer.feature.session.VideoDeleteIntent
 
@@ -49,8 +50,9 @@ internal fun VideoStorageSection(
     onDelete: () -> Unit,
     onDismissError: () -> Unit,
 ) {
+    val isImported = state.source == VideoSource.IMPORTED
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Label("Видео на телефоне")
+        Label(if (isImported) "Видео из галереи" else "Видео на телефоне")
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -61,7 +63,13 @@ internal fun VideoStorageSection(
         ) {
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = "Видео на телефоне — ${formatVideoSizeGb(state.sizeBytes)}",
+                    // A10 (#115): импортированное видео не занимает место приложения (лежит
+                    // в галерее) — размер не показываем, чтобы не намекать на «занятое место».
+                    text = if (isImported) {
+                        "Видео из галереи — доступно для разбора"
+                    } else {
+                        "Видео на телефоне — ${formatVideoSizeGb(state.sizeBytes)}"
+                    },
                     color = OnSurface,
                     fontSize = 14.sp,
                     fontWeight = FontWeight.Bold,
@@ -93,7 +101,12 @@ internal fun VideoStorageSection(
                 modifier = Modifier.heightIn(min = TouchTarget),
             ) {
                 Text(
-                    text = if (state.deleting) "Удаляем…" else "Удалить",
+                    text = when {
+                        state.deleting && isImported -> "Забываем…"
+                        state.deleting -> "Удаляем…"
+                        isImported -> "Забыть"
+                        else -> "Удалить"
+                    },
                     color = ErrorColor,
                     fontWeight = FontWeight.Bold,
                     fontSize = 13.sp,
@@ -114,9 +127,11 @@ internal fun VideoStorageSection(
 internal fun VideoDeleteConfirmSheet(
     sizeBytes: Long,
     intent: VideoDeleteIntent,
+    source: VideoSource = VideoSource.RECORDED,
     onConfirm: () -> Unit,
     onDismiss: () -> Unit,
 ) {
+    val isImported = source == VideoSource.IMPORTED
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -132,14 +147,21 @@ internal fun VideoDeleteConfirmSheet(
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             Text(
-                text = "Удалить видео тренировки?",
+                text = if (isImported) "Забыть видео тренировки?" else "Удалить видео тренировки?",
                 color = OnSurface,
                 fontSize = 18.sp,
                 fontWeight = FontWeight.Black,
             )
             Text(
-                text = "Видео тренировки (${formatVideoSizeGb(sizeBytes)}) будет удалено с телефона. " +
-                    "Кадры, которые ты уже выбрал, останутся.",
+                // A10 (#115): для IMPORTED файл физически не трогаем — предупреждение не
+                // должно говорить «удалено с телефона», это неправда, файл остаётся в галерее.
+                text = if (isImported) {
+                    "Приложение забудет об этом видео — оно останется в галерее. " +
+                        "Кадры, которые ты уже выбрал, останутся."
+                } else {
+                    "Видео тренировки (${formatVideoSizeGb(sizeBytes)}) будет удалено с телефона. " +
+                        "Кадры, которые ты уже выбрал, останутся."
+                },
                 color = OnSurfaceVariant,
                 fontSize = 13.sp,
             )
@@ -156,7 +178,12 @@ internal fun VideoDeleteConfirmSheet(
                     ),
                 ) {
                     Text(
-                        text = if (intent == VideoDeleteIntent.COMPLETE_REVIEW) "Завершить и удалить" else "Удалить",
+                        text = when {
+                            intent == VideoDeleteIntent.COMPLETE_REVIEW && isImported -> "Завершить и забыть"
+                            intent == VideoDeleteIntent.COMPLETE_REVIEW -> "Завершить и удалить"
+                            isImported -> "Забыть"
+                            else -> "Удалить"
+                        },
                         fontWeight = FontWeight.Bold,
                         fontSize = 14.sp,
                     )

@@ -100,6 +100,7 @@ fun RecorderScreen(
     viewModel: RecorderViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val context = LocalContext.current
 
     // Режим выбирается один раз за вход на экран. Saveable, чтобы пережить поворот.
     // Если экран переоткрыли во время активной/только что завершённой записи —
@@ -118,6 +119,22 @@ fun RecorderScreen(
     }
     val selectedMode = selectedModeName?.let { RecordingMode.valueOf(it) }
 
+    // Импорт видео из галереи (A10, #115) — третий вариант, но не RecordingMode
+    // (импорт не режим записи, см. RecorderViewModel.importVideo docblock).
+    var importUriString by rememberSaveable { mutableStateOf<String?>(null) }
+    val importLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument(),
+    ) { uri ->
+        if (uri != null) {
+            // Persistable-доступ обязан пережить перезапуск приложения — видео нужно
+            // до конца разбора, а не только на время этой сессии Activity (issue).
+            runCatching {
+                context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            importUriString = uri.toString()
+        }
+    }
+
     Column(
         modifier = modifier
             .fillMaxSize()
@@ -126,24 +143,36 @@ fun RecorderScreen(
         Header(onBack = onClose)
 
         Box(modifier = Modifier.fillMaxSize()) {
-            when (selectedMode) {
-                null -> Box(
+            val importUri = importUriString
+            when {
+                importUri != null -> ImportFlow(
+                    sessionId = sessionId,
+                    uri = Uri.parse(importUri),
+                    viewModel = viewModel,
+                    onCancel = { importUriString = null },
+                    onClose = onClose,
+                )
+
+                selectedMode == null -> Box(
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(horizontal = 28.dp),
                     contentAlignment = Alignment.Center,
                 ) {
-                    ModeSelectContent(onSelect = { selectedModeName = it.name })
+                    ModeSelectContent(
+                        onSelect = { selectedModeName = it.name },
+                        onImportClick = { importLauncher.launch(arrayOf("video/*")) },
+                    )
                 }
 
-                RecordingMode.AUDIO -> AudioFlow(
+                selectedMode == RecordingMode.AUDIO -> AudioFlow(
                     sessionId = sessionId,
                     state = state,
                     viewModel = viewModel,
                     onClose = onClose,
                 )
 
-                RecordingMode.VIDEO -> VideoFlow(
+                selectedMode == RecordingMode.VIDEO -> VideoFlow(
                     sessionId = sessionId,
                     state = state,
                     viewModel = viewModel,
@@ -154,9 +183,9 @@ fun RecorderScreen(
     }
 }
 
-/** Выбор режима до старта записи (A3, #97). Аудио — как раньше, видео — новый режим. */
+/** Выбор режима до старта записи (A3, #97; импорт — A10, #115). */
 @Composable
-private fun ModeSelectContent(onSelect: (RecordingMode) -> Unit) {
+private fun ModeSelectContent(onSelect: (RecordingMode) -> Unit, onImportClick: () -> Unit) {
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(20.dp),
@@ -179,6 +208,12 @@ private fun ModeSelectContent(onSelect: (RecordingMode) -> Unit) {
             title = "Видео",
             subtitle = "Телефон на штативе. Экран не гаснет во время записи.",
             onClick = { onSelect(RecordingMode.VIDEO) },
+        )
+        ModeOptionCard(
+            glyph = "🖼",
+            title = "Загрузить видео из галереи",
+            subtitle = "Снято на камеру или другой телефон — звук и картинка уже синхронны.",
+            onClick = onImportClick,
         )
     }
 }
@@ -628,6 +663,97 @@ private fun VideoRecordingOverlay(recording: RecordingState.Recording, onStop: (
     }
 }
 
+// --- Импорт видео из галереи (A10, #115) ---
+
+/**
+ * Экран прогресса импорта: файл уже выбран ([uri]), извлекаем звук ремуксом
+ * ([RecorderViewModel.importVideo]) и показываем процент. Нет камеры/превью —
+ * извлечение идёт по чужому файлу в фоне, тренеру достаточно индикатора.
+ */
+@Composable
+private fun ImportFlow(
+    sessionId: String,
+    uri: Uri,
+    viewModel: RecorderViewModel,
+    onCancel: () -> Unit,
+    onClose: () -> Unit,
+) {
+    val importState by viewModel.importState.collectAsStateWithLifecycle()
+
+    LaunchedEffect(uri) {
+        viewModel.importVideo(sessionId, uri)
+    }
+
+    val done = importState is ImportUiState.Done
+    LaunchedEffect(done) {
+        if (done) {
+            delay(1_400)
+            viewModel.acknowledgeImport()
+            onClose()
+        }
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 28.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        when (val s = importState) {
+            ImportUiState.Idle -> CircularProgressIndicator(color = Primary)
+
+            is ImportUiState.Extracting -> Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(20.dp),
+            ) {
+                CircularProgressIndicator(color = Primary)
+                Text(
+                    text = "Извлекаем звук из видео… ${s.percent}%",
+                    color = OnSurface,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Black,
+                    textAlign = TextAlign.Center,
+                )
+                Text(
+                    text = "Видео остаётся в галерее — приложение только читает звуковую дорожку.",
+                    color = OnSurfaceVariant,
+                    fontSize = 13.sp,
+                    textAlign = TextAlign.Center,
+                )
+                OutlinedButton(
+                    onClick = {
+                        viewModel.cancelImport()
+                        onCancel()
+                    },
+                    modifier = Modifier.fillMaxWidth().heightIn(min = TouchTarget),
+                    shape = RoundedCornerShape(16.dp),
+                ) {
+                    Text("Отмена", color = OnSurface, fontSize = 14.sp)
+                }
+            }
+
+            ImportUiState.Done -> StatusContent(
+                glyph = "✓",
+                glyphColor = Primary,
+                title = "Видео импортировано",
+                subtitle = "Транскрипция запущена — обычно занимает 15–30 секунд. Файл остался в галерее.",
+            )
+
+            is ImportUiState.Error -> ErrorContent(
+                message = s.message,
+                onRetry = {
+                    viewModel.acknowledgeImport()
+                    viewModel.importVideo(sessionId, uri)
+                },
+                onBack = {
+                    viewModel.acknowledgeImport()
+                    onCancel()
+                },
+            )
+        }
+    }
+}
+
 // --- Общие блоки ---
 
 /** Хедер как на остальных экранах: «‹» назад + центрированный заголовок «Запись». */
@@ -932,7 +1058,7 @@ private fun ModeSelectPreview() {
                 .padding(28.dp),
             contentAlignment = Alignment.Center,
         ) {
-            ModeSelectContent(onSelect = {})
+            ModeSelectContent(onSelect = {}, onImportClick = {})
         }
     }
 }

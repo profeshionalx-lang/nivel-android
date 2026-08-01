@@ -1,14 +1,43 @@
 package com.nivel.trainer.feature.recorder
 
+import android.content.Context
+import android.media.MediaMetadataRetriever
+import android.net.Uri
 import android.os.SystemClock
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
 import com.nivel.trainer.service.RecordingController
 import com.nivel.trainer.service.RecordingMode
 import com.nivel.trainer.service.RecordingState
+import com.nivel.trainer.service.video.AudioTrackExtractor
 import dagger.hilt.android.lifecycle.HiltViewModel
+import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.File
-import kotlinx.coroutines.flow.StateFlow
 import javax.inject.Inject
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+
+/**
+ * Состояние импорта видео из галереи (A10, #115). Отдельно от [RecordingState] —
+ * импорт не режим записи ([RecordingMode] нарочно не расширяем под него, см. issue).
+ */
+sealed interface ImportUiState {
+    data object Idle : ImportUiState
+
+    /** Идёт ремукс звука ([AudioTrackExtractor]) — [percent] 0..100. */
+    data class Extracting(val percent: Int) : ImportUiState
+
+    /** Звук извлечён, видео зарегистрировано в [RecordingController] — экран может закрыться. */
+    data object Done : ImportUiState
+
+    /** Не удалось извлечь звук (нет дорожки / не AAC / файл недоступен) — текст для UI. */
+    data class Error(val message: String) : ImportUiState
+}
 
 /**
  * ViewModel экрана записи (C2, #11; режимы — A3/#97; звук видео-режима — A4/#98) —
@@ -32,10 +61,62 @@ import javax.inject.Inject
 @HiltViewModel
 class RecorderViewModel @Inject constructor(
     private val controller: RecordingController,
+    private val audioTrackExtractor: AudioTrackExtractor,
+    @ApplicationContext private val context: Context,
 ) : ViewModel() {
 
     /** Состояние записи — единый источник правды, переживает пересоздание Activity. */
     val state: StateFlow<RecordingState> = controller.state
+
+    private val _importState = MutableStateFlow<ImportUiState>(ImportUiState.Idle)
+
+    /** Состояние импорта видео из галереи (A10, #115) — отдельно от [state], не режим записи. */
+    val importState: StateFlow<ImportUiState> = _importState.asStateFlow()
+
+    private var importJob: Job? = null
+
+    /**
+     * Импорт видео [uri] для сессии [sessionId]: извлекает звук ремуксом
+     * ([AudioTrackExtractor]), ставит его в очередь заливки существующим путём и
+     * регистрирует видео в [RecordingController.videoImported]. Персистентный доступ
+     * к [uri] (`takePersistableUriPermission`) экран берёт на себя ДО вызова — здесь
+     * только извлечение звука и хэндофф.
+     */
+    fun importVideo(sessionId: String, uri: Uri) {
+        if (_importState.value is ImportUiState.Extracting) return
+        _importState.value = ImportUiState.Extracting(0)
+        importJob = viewModelScope.launch {
+            val durationMs = readDurationMs(uri)
+            audioTrackExtractor.extract(uri, sessionId) { percent ->
+                _importState.value = ImportUiState.Extracting(percent)
+            }.onSuccess { audioFile ->
+                controller.videoImported(sessionId, uri, durationMs, audioFile.absolutePath)
+                _importState.value = ImportUiState.Done
+            }.onFailure { e ->
+                _importState.value = ImportUiState.Error(e.message ?: "Не удалось извлечь звук из видео")
+            }
+        }
+    }
+
+    /** Отмена импорта (уход с экрана посреди извлечения на большом файле). */
+    fun cancelImport() {
+        importJob?.cancel()
+        importJob = null
+        _importState.value = ImportUiState.Idle
+    }
+
+    /** Сброс терминального состояния импорта после того, как UI его показал. */
+    fun acknowledgeImport() {
+        _importState.value = ImportUiState.Idle
+    }
+
+    private suspend fun readDurationMs(uri: Uri): Long = withContext(Dispatchers.IO) {
+        val retriever = MediaMetadataRetriever()
+        runCatching {
+            retriever.setDataSource(context, uri)
+            retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
+        }.getOrDefault(0L).also { runCatching { retriever.release() } }
+    }
 
     /** Старт аудио-записи для сессии. Разрешения экран запрашивает заранее (см. RecorderScreen). */
     fun start(sessionId: String) = controller.start(sessionId)

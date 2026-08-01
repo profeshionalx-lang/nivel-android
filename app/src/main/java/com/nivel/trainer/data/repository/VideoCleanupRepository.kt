@@ -1,9 +1,12 @@
 package com.nivel.trainer.data.repository
 
+import android.content.Context
 import com.nivel.trainer.data.local.LocalVideoStore
 import com.nivel.trainer.data.local.VideoRecord
+import com.nivel.trainer.data.local.VideoSource
 import com.nivel.trainer.domain.InsightCard
 import com.nivel.trainer.service.upload.PendingFrameUploadsChecker
+import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.File
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -47,6 +50,7 @@ interface VideoCleanupRepository {
 class DefaultVideoCleanupRepository @Inject constructor(
     private val localVideoStore: LocalVideoStore,
     private val pendingFrameUploadsChecker: PendingFrameUploadsChecker,
+    @ApplicationContext private val context: Context,
 ) : VideoCleanupRepository {
 
     override fun observe(sessionId: String): Flow<VideoRecord?> = localVideoStore.observe(sessionId)
@@ -62,12 +66,26 @@ class DefaultVideoCleanupRepository @Inject constructor(
         }
 
         return runCatching {
-            val file = File(record.videoPath)
-            check(!file.exists() || file.delete()) { "Не удалось удалить файл видео" }
+            // ⚠️ Двойной предохранитель (A10, #115): удаляем файл с диска, ТОЛЬКО если
+            // ОБА условия выполнены — источник RECORDED (не IMPORTED, галерейный файл
+            // никогда не трогаем) И путь физически лежит внутри context.filesDir (не
+            // "или" — даже испорченная/подменённая запись не даст стереть чужой файл).
+            // Для IMPORTED — только забываем запись, файл в галерее остаётся на месте.
+            if (canDeleteFromDisk(record)) {
+                val file = File(record.videoPath)
+                check(!file.exists() || file.delete()) { "Не удалось удалить файл видео" }
+            }
             localVideoStore.remove(sessionId)
         }.fold(
             onSuccess = { VideoDeletionResult.Deleted },
             onFailure = { e -> VideoDeletionResult.Failure(e.message ?: "Не удалось удалить видео") },
         )
+    }
+
+    private fun canDeleteFromDisk(record: VideoRecord): Boolean {
+        if (record.source != VideoSource.RECORDED) return false
+        val filesDirPath = context.filesDir.canonicalFile.path
+        val filePath = runCatching { File(record.videoPath).canonicalFile.path }.getOrNull() ?: return false
+        return filePath == filesDirPath || filePath.startsWith(filesDirPath + File.separator)
     }
 }

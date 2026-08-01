@@ -1,8 +1,11 @@
 package com.nivel.trainer.feature.frames
 
+import android.content.Context
 import android.graphics.Bitmap
 import android.media.MediaMetadataRetriever
+import android.net.Uri
 import android.os.Build
+import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlin.math.roundToInt
@@ -13,6 +16,18 @@ import kotlinx.coroutines.withContext
 
 /** Один кадр плёнки-превью — время в видео (мс) + уже уменьшенный bitmap. */
 data class FilmstripFrame(val videoTimeMs: Long, val bitmap: Bitmap)
+
+/**
+ * Откуда брать байты видео (A10, #115) — записанное приложением видео лежит File-путём
+ * в `filesDir`, импортированное из галереи — `content://` (SAF, доступ пережил
+ * перезапуск через `takePersistableUriPermission`). [MediaMetadataRetriever] умеет
+ * оба варианта, но через разные перегрузки `setDataSource` — эта абстракция прячет
+ * разницу от [FrameScrubberViewModel][com.nivel.trainer.feature.frames.FrameScrubberViewModel].
+ */
+sealed interface FrameVideoSource {
+    data class LocalPath(val path: String) : FrameVideoSource
+    data class ContentUri(val uri: Uri) : FrameVideoSource
+}
 
 /**
  * Источник кадров видео (A6, #100) — спрятан за интерфейсом, чтобы ExoPlayer/Media3 мог
@@ -73,7 +88,10 @@ interface FrameSource {
  *   потоке пула Dispatchers.IO. `synchronized` тут безопасен: внутри блоков нет suspend
  *   вызовов — только синхронные нативные вызовы ретривера.
  */
-class MediaMetadataFrameSource(private val videoPath: String) : FrameSource {
+class MediaMetadataFrameSource(
+    private val source: FrameVideoSource,
+    private val context: Context,
+) : FrameSource {
 
     private val retriever = MediaMetadataRetriever()
     private val lock = Any()
@@ -83,7 +101,10 @@ class MediaMetadataFrameSource(private val videoPath: String) : FrameSource {
     override suspend fun prepare(): Boolean = withContext(Dispatchers.IO) {
         synchronized(lock) {
             runCatching {
-                retriever.setDataSource(videoPath)
+                when (val s = source) {
+                    is FrameVideoSource.LocalPath -> retriever.setDataSource(s.path)
+                    is FrameVideoSource.ContentUri -> retriever.setDataSource(context, s.uri)
+                }
                 readAspectRatio()
                 prepared = true
                 true
@@ -154,10 +175,12 @@ class MediaMetadataFrameSource(private val videoPath: String) : FrameSource {
 
 /** Фабрика [FrameSource] — уровень непрямого обращения для DI/подмены реализации (план Б — ExoPlayer). */
 interface FrameSourceFactory {
-    fun create(videoPath: String): FrameSource
+    fun create(source: FrameVideoSource): FrameSource
 }
 
 @Singleton
-class MediaMetadataFrameSourceFactory @Inject constructor() : FrameSourceFactory {
-    override fun create(videoPath: String): FrameSource = MediaMetadataFrameSource(videoPath)
+class MediaMetadataFrameSourceFactory @Inject constructor(
+    @ApplicationContext private val context: Context,
+) : FrameSourceFactory {
+    override fun create(source: FrameVideoSource): FrameSource = MediaMetadataFrameSource(source, context)
 }

@@ -141,6 +141,7 @@ fun SessionDetailScreen(
         VideoDeleteConfirmSheet(
             sizeBytes = videoDeleteConfirm.sizeBytes,
             intent = videoDeleteConfirm.intent,
+            source = videoDeleteConfirm.source,
             onConfirm = viewModel::confirmVideoDelete,
             onDismiss = viewModel::dismissVideoDeleteConfirm,
         )

@@ -2,10 +2,12 @@ package com.nivel.trainer.feature.frames
 
 import android.content.Context
 import android.graphics.Bitmap
+import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.nivel.trainer.data.local.LocalVideoStore
 import com.nivel.trainer.data.local.VideoRecord
+import com.nivel.trainer.data.local.VideoSource
 import com.nivel.trainer.data.repository.SessionDetailRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -112,14 +114,19 @@ class FrameScrubberViewModel @Inject constructor(
                 )
                 return@launch
             }
-            if (!File(record.videoPath).exists()) {
-                _state.value = FrameScrubberUiState.NoVideo("Файл видео на телефоне отсутствует — возможно, он был удалён вручную.")
+            val videoSource = record.toFrameVideoSource()
+            if (videoSource == null || !isAvailable(videoSource)) {
+                val message = when (record.source) {
+                    VideoSource.RECORDED -> "Файл видео на телефоне отсутствует — возможно, он был удалён вручную."
+                    VideoSource.IMPORTED -> "Видео из галереи недоступно — возможно, файл был удалён или перемещён."
+                }
+                _state.value = FrameScrubberUiState.NoVideo(message)
                 return@launch
             }
 
             momentSeconds = moment
             videoRecord = record
-            val source = frameSourceFactory.create(record.videoPath)
+            val source = frameSourceFactory.create(videoSource)
             val prepared = withContext(Dispatchers.IO) { source.prepare() }
             if (!prepared) {
                 source.release() // retriever уже аллоцировал нативные ресурсы к моменту неудачного prepare()
@@ -239,6 +246,20 @@ class FrameScrubberViewModel @Inject constructor(
             _state.value = ready.copy(saving = false)
             onResult(FrameSelectionResult(cardId = cardId, slot = slot, jpegPath = savedPath, selectedSeconds = selectedSeconds))
         }
+    }
+
+    /** [VideoRecord] → [FrameVideoSource] по источнику (A10, #115); `null` — данных не хватает (не должно случиться). */
+    private fun VideoRecord.toFrameVideoSource(): FrameVideoSource? = when (source) {
+        VideoSource.RECORDED -> FrameVideoSource.LocalPath(videoPath)
+        VideoSource.IMPORTED -> videoUri?.let { FrameVideoSource.ContentUri(Uri.parse(it)) }
+    }
+
+    /** «Видео на месте» — для RECORDED это `File.exists()`, для IMPORTED — реально открывается `content://`. */
+    private fun isAvailable(source: FrameVideoSource): Boolean = when (source) {
+        is FrameVideoSource.LocalPath -> File(source.path).exists()
+        is FrameVideoSource.ContentUri -> runCatching {
+            context.contentResolver.openFileDescriptor(source.uri, "r")?.use { true } ?: false
+        }.getOrDefault(false)
     }
 
     private fun saveJpeg(bitmap: Bitmap): String? = runCatching {

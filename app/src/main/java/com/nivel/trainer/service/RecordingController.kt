@@ -2,10 +2,14 @@ package com.nivel.trainer.service
 
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import android.os.SystemClock
+import android.provider.OpenableColumns
 import androidx.core.content.ContextCompat
+import androidx.work.ExistingWorkPolicy
 import com.nivel.trainer.data.local.LocalVideoStore
 import com.nivel.trainer.data.local.VideoRecord
+import com.nivel.trainer.data.local.VideoSource
 import com.nivel.trainer.service.upload.AudioUploadScheduler
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.File
@@ -335,4 +339,49 @@ class RecordingController @Inject constructor(
             )
         }
     }
+
+    // --- Импорт видео из галереи (A10, #115) ---
+
+    /**
+     * Экран записи сообщает: видео [uri] выбрано из галереи, звук уже извлечён в
+     * [audioPath] (см. [com.nivel.trainer.service.video.AudioTrackExtractor]).
+     * Минует [tryFinalizeVideoSession]/[RecordingState] целиком — импорт не «режим
+     * записи» ([RecordingMode] нарочно не расширяем под него, см. issue), а отдельное
+     * разовое действие: сюда не идёт таймер/превью/CameraX, только хэндофф в
+     * [LocalVideoStore] + постановка звука в очередь заливки существующим шедулером.
+     *
+     * [audioStartOffsetMs] всегда `0L` (не `null`) — звук и картинка лежат в одном
+     * контейнере галерейного видео, дрейфа между стартами двух рекордеров тут нет по
+     * определению (см. докблок [VideoRecord.audioStartOffsetMs]).
+     */
+    fun videoImported(sessionId: String, uri: Uri, durationMs: Long, audioPath: String) {
+        scope.launch {
+            localVideoStore.put(
+                VideoRecord(
+                    sessionId = sessionId,
+                    videoPath = "",
+                    videoUri = uri.toString(),
+                    source = VideoSource.IMPORTED,
+                    startedAtEpochMs = System.currentTimeMillis(),
+                    startedAtElapsedRealtimeMs = SystemClock.elapsedRealtime(),
+                    durationMs = durationMs,
+                    audioStartOffsetMs = 0L,
+                    sizeBytes = queryContentSize(uri) ?: 0L,
+                ),
+            )
+        }
+        // REPLACE, не KEEP: импорт — явное разовое действие тренера (как ручной повтор
+        // заливки, AudioUploadScheduler.retry), а не хэндофф записи. Если для этой же
+        // сессии в очереди уже болтается старая работа (например, с прошлой неудачной
+        // попытки импорта), свежий файл должен её заменить, а не быть проигнорированным.
+        uploadScheduler.enqueue(sessionId = sessionId, filePath = audioPath, policy = ExistingWorkPolicy.REPLACE)
+    }
+
+    /** Размер файла в галерее через `ContentResolver` — `File.length()` тут неприменим (не наш `content://`). */
+    private fun queryContentSize(uri: Uri): Long? = runCatching {
+        context.contentResolver.query(uri, arrayOf(OpenableColumns.SIZE), null, null, null)?.use { cursor ->
+            val index = cursor.getColumnIndex(OpenableColumns.SIZE)
+            if (index >= 0 && cursor.moveToFirst()) cursor.getLong(index) else null
+        }
+    }.getOrNull()
 }

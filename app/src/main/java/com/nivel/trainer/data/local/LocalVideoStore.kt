@@ -18,14 +18,30 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
 /**
- * Метаданные локального видео тренировки (A4, #98). Видео само на сервер не уезжает
- * (эпик NIVEL#235) — телефон должен помнить, какой `.mp4` к какой сессии относится и
- * когда начался, чтобы экран сессии (A6/A8) мог открыть скрабер кадра.
+ * Источник видео (A10, #115):
+ * - [RECORDED] — записано самим приложением (CameraX), файл лежит в `filesDir` — только
+ *   такое видео можно физически стирать (см. [com.nivel.trainer.data.repository.VideoCleanupRepository]).
+ * - [IMPORTED] — выбрано из галереи ([videoPath]-путь не имеет смысла, актуален [VideoRecord.videoUri]),
+ *   файл остаётся в галерее — приложение только «забывает» о нём, никогда не удаляет.
+ */
+@Serializable
+enum class VideoSource { RECORDED, IMPORTED }
+
+/**
+ * Метаданные локального видео тренировки (A4, #98; импорт — A10, #115). Видео само на
+ * сервер не уезжает (эпик NIVEL#235) — телефон должен помнить, какой `.mp4`/`content://`
+ * к какой сессии относится и когда начался, чтобы экран сессии (A6/A8) мог открыть
+ * скрабер кадра.
  *
  * [audioStartOffsetMs] — рассинхрон стартов видео/аудио рекордеров (вариант B), см.
  * [com.nivel.trainer.service.RecordingState.Recording]; `null`, если запись
  * восстановлена сканом каталога ([LocalVideoStore.recoverFromDisk]) — оффсет оттуда не
- * извлечь.
+ * извлечь. Для [VideoSource.IMPORTED] — всегда `0L` (явно, не `null`): звук и картинка
+ * лежат в одном контейнере галерейного видео, рассинхрона нет по определению.
+ *
+ * [videoPath] — для [VideoSource.RECORDED] абсолютный путь `.mp4` в `filesDir`; для
+ * [VideoSource.IMPORTED] не используется (пусто), актуален [videoUri] — persistable
+ * `content://` из [android.provider.DocumentsContract]/SAF.
  */
 @Serializable
 data class VideoRecord(
@@ -36,6 +52,8 @@ data class VideoRecord(
     val durationMs: Long,
     val audioStartOffsetMs: Long? = null,
     val sizeBytes: Long,
+    val videoUri: String? = null,
+    val source: VideoSource = VideoSource.RECORDED,
 )
 
 /**

@@ -3,6 +3,7 @@ package com.nivel.trainer.feature.session
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.nivel.trainer.data.local.VideoSource
 import com.nivel.trainer.data.repository.CardActionResult
 import com.nivel.trainer.data.repository.InsightsRepository
 import com.nivel.trainer.data.repository.InsightsResult
@@ -124,6 +125,8 @@ sealed interface LocalVideoUiState {
         val sizeBytes: Long,
         val deleting: Boolean = false,
         val error: String? = null,
+        /** A10 (#115): RECORDED — файл в `filesDir`, показываем занятое место; IMPORTED — видео в галерее, без индикатора места. */
+        val source: VideoSource = VideoSource.RECORDED,
     ) : LocalVideoUiState
 }
 
@@ -143,7 +146,12 @@ enum class VideoDeleteIntent {
  */
 sealed interface VideoDeleteConfirmState {
     data object Closed : VideoDeleteConfirmState
-    data class Open(val sizeBytes: Long, val intent: VideoDeleteIntent) : VideoDeleteConfirmState
+    data class Open(
+        val sizeBytes: Long,
+        val intent: VideoDeleteIntent,
+        /** A10 (#115): текст предупреждения отличается — для IMPORTED файл не удаляется, только забывается. */
+        val source: VideoSource = VideoSource.RECORDED,
+    ) : VideoDeleteConfirmState
 }
 
 /**
@@ -288,12 +296,15 @@ class SessionDetailViewModel @Inject constructor(
         viewModelScope.launch {
             videoCleanupRepository.observe(sessionId).collect { record ->
                 _uiState.update { state ->
-                    val size = record?.sizeBytes
                     when {
-                        size == null -> state.copy(localVideo = LocalVideoUiState.None)
+                        record == null -> state.copy(localVideo = LocalVideoUiState.None)
                         state.localVideo is LocalVideoUiState.Present ->
-                            state.copy(localVideo = state.localVideo.copy(sizeBytes = size))
-                        else -> state.copy(localVideo = LocalVideoUiState.Present(sizeBytes = size))
+                            state.copy(
+                                localVideo = state.localVideo.copy(sizeBytes = record.sizeBytes, source = record.source),
+                            )
+                        else -> state.copy(
+                            localVideo = LocalVideoUiState.Present(sizeBytes = record.sizeBytes, source = record.source),
+                        )
                     }
                 }
             }
@@ -544,6 +555,7 @@ class SessionDetailViewModel @Inject constructor(
                     videoDeleteConfirm = VideoDeleteConfirmState.Open(
                         sizeBytes = localVideo.sizeBytes,
                         intent = VideoDeleteIntent.COMPLETE_REVIEW,
+                        source = localVideo.source,
                     ),
                 )
             }
@@ -588,6 +600,7 @@ class SessionDetailViewModel @Inject constructor(
                 videoDeleteConfirm = VideoDeleteConfirmState.Open(
                     sizeBytes = localVideo.sizeBytes,
                     intent = VideoDeleteIntent.MANUAL,
+                    source = localVideo.source,
                 ),
             )
         }

@@ -34,6 +34,7 @@ import kotlin.math.roundToInt
 @Composable
 internal fun DraggableCardList(
     cards: List<InsightCard>,
+    frameActions: FrameSlotActions,
     onMoveCard: (fromIndex: Int, toIndex: Int) -> Unit,
     onDragEnd: () -> Unit,
 ) {
@@ -103,7 +104,7 @@ internal fun DraggableCardList(
                         )
                     },
             ) {
-                DraggableCardView(card = card, isDragged = isDragged, alpha = cardAlpha)
+                DraggableCardView(card = card, isDragged = isDragged, alpha = cardAlpha, frameActions = frameActions)
             }
         }
     }

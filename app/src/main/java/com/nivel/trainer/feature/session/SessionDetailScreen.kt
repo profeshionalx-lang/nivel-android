@@ -16,12 +16,14 @@ import androidx.compose.ui.Modifier
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.nivel.trainer.domain.SessionOverview
+import com.nivel.trainer.feature.frames.FrameSlot
 import com.nivel.trainer.feature.session.components.Background
 import com.nivel.trainer.feature.session.components.CenterBox
 import com.nivel.trainer.feature.session.components.CompleteReviewErrorBanner
 import com.nivel.trainer.feature.session.components.EditCardSheet
 import com.nivel.trainer.feature.session.components.EmptyState
 import com.nivel.trainer.feature.session.components.ErrorState
+import com.nivel.trainer.feature.session.components.FrameSlotActions
 import com.nivel.trainer.feature.session.components.Header
 import com.nivel.trainer.feature.session.components.LibrarySheet
 import com.nivel.trainer.feature.session.components.PasteInsightsSheet
@@ -47,6 +49,9 @@ fun SessionDetailScreen(
     sessionId: String,
     onBack: () -> Unit = {},
     onRecord: () -> Unit = {},
+    // A8 (#102): вход в скрабер кадра (A6, #100) — навигация решается вызывающей
+    // стороной (NivelNavHost), ViewModel про NavController не знает.
+    onOpenScrubber: (cardId: String, slot: FrameSlot) -> Unit = { _, _ -> },
     modifier: Modifier = Modifier,
     viewModel: SessionDetailViewModel = hiltViewModel(),
 ) {
@@ -85,6 +90,16 @@ fun SessionDetailScreen(
         }
     }
 
+    // A8 (#102): пучок данных/колбэков FrameSlotRow — hasLocalVideo/стадии заливки читаются
+    // из ViewModel, onPick вызывает навигацию, которую знает только этот экран.
+    val frameActions = FrameSlotActions(
+        hasLocalVideo = state.localVideo is LocalVideoUiState.Present,
+        stageFor = viewModel::frameStageFor,
+        onPick = onOpenScrubber,
+        onRemove = viewModel::removeFrame,
+        onRetry = viewModel::retryFrameUpload,
+    )
+
     SessionDetailContent(
         loading = state.loading,
         error = state.error,
@@ -99,6 +114,7 @@ fun SessionDetailScreen(
         isOffline = state.isOffline,
         cardActionError = state.cardActionError,
         localVideo = state.localVideo,
+        frameActions = frameActions,
         onGenerate = viewModel::generateInsights,
         onOpenPaste = viewModel::openPasteSheet,
         onOpenLibrary = viewModel::openLibrarySheet,
@@ -188,6 +204,13 @@ internal fun SessionDetailContent(
     isOffline: Boolean = false,
     cardActionError: String? = null,
     localVideo: LocalVideoUiState = LocalVideoUiState.None,
+    frameActions: FrameSlotActions = FrameSlotActions(
+        hasLocalVideo = false,
+        stageFor = { _, _ -> UploadStage.None },
+        onPick = { _, _ -> },
+        onRemove = { _, _ -> },
+        onRetry = { _, _ -> },
+    ),
     onGenerate: () -> Unit = {},
     onOpenPaste: () -> Unit = {},
     onOpenLibrary: () -> Unit = {},
@@ -246,6 +269,7 @@ internal fun SessionDetailContent(
                     completingReview = completingReview,
                     cards = reorderedCards ?: overview.cards,
                     localVideo = localVideo,
+                    frameActions = frameActions,
                     onGenerate = onGenerate,
                     onOpenPaste = onOpenPaste,
                     onOpenLibrary = onOpenLibrary,

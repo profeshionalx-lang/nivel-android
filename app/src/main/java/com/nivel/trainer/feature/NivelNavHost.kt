@@ -184,6 +184,12 @@ fun NivelNavHost(
                 sessionId = sessionId,
                 onBack = { navController.popBackStack() },
                 onRecord = { navController.navigate(NivelRoutes.record(sessionId)) },
+                // A8 (#102): тап по пустому слоту кадра — открыть скрабер (A6, #100) на нужном
+                // моменте карточки. Результат SessionDetailViewModel заберёт сам из
+                // savedStateHandle этого же backstack entry (см. блок FRAME ниже).
+                onOpenScrubber = { cardId, slot ->
+                    navController.navigate(NivelRoutes.frame(sessionId, cardId, slot))
+                },
             )
         }
 
@@ -213,9 +219,9 @@ fun NivelNavHost(
 
         // A6 (#100) — скрабер: тренер тапом фиксирует точный кадр удара в окне
         // [-8с…+2с] от момента карточки. Результат кладём в savedStateHandle
-        // предыдущей записи бэкстека — по нему же A8 (#102) заберёт JPEG+время,
-        // когда добавит вызов этого экрана со слотов карточки; сам A6 вызывающей
-        // стороны ещё не содержит (см. `## Отклонения от плана` в PR).
+        // предыдущей записи бэкстека — SessionDetailViewModel (A8, #102) читает его
+        // оттуда же (Hilt скоупит SavedStateHandle ViewModel'а на тот же entry) и
+        // ставит кадр в очередь заливки (A7, #101).
         composable(
             route = NivelRoutes.FRAME,
             arguments = listOf(

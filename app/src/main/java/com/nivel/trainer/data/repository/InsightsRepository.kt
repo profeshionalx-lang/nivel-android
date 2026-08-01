@@ -62,6 +62,12 @@ interface InsightsRepository {
         tag: String,
         side: String?,
     ): CardActionResult
+
+    /**
+     * Снять кадр со слота (A8, #102, `DELETE …/frames/{slot}`). Идемпотентно на
+     * сервере — повторный вызов на уже пустом слоте тоже успех.
+     */
+    suspend fun removeFrame(cardId: String, slot: String): CardActionResult
 }
 
 @Singleton
@@ -106,6 +112,13 @@ class DefaultInsightsRepository @Inject constructor(
         side: String?,
     ): CardActionResult =
         runCatching { api.updateCard(cardId, UpdateCardRequest(title, body, tag, side)) }
+            .fold(
+                onSuccess = { CardActionResult.Success },
+                onFailure = { CardActionResult.Failure(messageFor(it, parseError = false)) },
+            )
+
+    override suspend fun removeFrame(cardId: String, slot: String): CardActionResult =
+        runCatching { api.deleteFrame(cardId, slot) }
             .fold(
                 onSuccess = { CardActionResult.Success },
                 onFailure = { CardActionResult.Failure(messageFor(it, parseError = false)) },

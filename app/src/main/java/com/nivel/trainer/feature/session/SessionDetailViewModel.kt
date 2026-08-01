@@ -1,5 +1,6 @@
 package com.nivel.trainer.feature.session
 
+import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.nivel.trainer.data.repository.CardActionResult
@@ -13,7 +14,12 @@ import com.nivel.trainer.domain.CardCollection
 import com.nivel.trainer.domain.CollectionCardPreview
 import com.nivel.trainer.domain.InsightCard
 import com.nivel.trainer.domain.SessionOverview
+import com.nivel.trainer.feature.frames.FrameScrubberResultKeys
+import com.nivel.trainer.feature.frames.FrameSelectionResult
+import com.nivel.trainer.feature.frames.FrameSlot
 import com.nivel.trainer.service.upload.AudioUploadScheduler
+import com.nivel.trainer.service.upload.FrameUploadScheduler
+import com.nivel.trainer.service.upload.FrameUploadStatusObserver
 import com.nivel.trainer.service.upload.UploadStage
 import com.nivel.trainer.service.upload.UploadStatusObserver
 import com.nivel.trainer.ui.state.isNetworkError
@@ -191,6 +197,12 @@ data class SessionDetailUiState(
     val localVideo: LocalVideoUiState = LocalVideoUiState.None,
     /** A9 (#103): открытое подтверждение удаления видео (см. [VideoDeleteConfirmState]). */
     val videoDeleteConfirm: VideoDeleteConfirmState = VideoDeleteConfirmState.Closed,
+    /**
+     * A8 (#102): стадия заливки кадра per карточка+слот (WorkManager, A7 #101).
+     * Ключ — `"$cardId:${slot.routeValue}"` (см. [SessionDetailViewModel.frameKey]).
+     * Отсутствие ключа = [UploadStage.None] (см. [SessionDetailViewModel.frameStageFor]).
+     */
+    val frameUploads: Map<String, UploadStage> = emptyMap(),
 )
 
 /**
@@ -210,12 +222,29 @@ class SessionDetailViewModel @Inject constructor(
     private val uploadScheduler: AudioUploadScheduler,
     private val collectionsRepository: SessionCollectionsRepository,
     private val videoCleanupRepository: VideoCleanupRepository,
+    private val frameUploadStatusObserver: FrameUploadStatusObserver,
+    private val frameUploadScheduler: FrameUploadScheduler,
+    /**
+     * A8 (#102): SavedStateHandle этого ViewModel'а — Hilt скоупит его на тот же
+     * `NavBackStackEntry`, на который `NivelNavHost` кладёт [FrameSelectionResult]
+     * (`navController.previousBackStackEntry` при возврате со скрабера — это и есть
+     * entry сессии). Так экран узнаёт, что скрабер вернул кадр, без прямой зависимости
+     * от `NavController` внутри ViewModel.
+     */
+    private val savedStateHandle: SavedStateHandle,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(SessionDetailUiState())
     val uiState: StateFlow<SessionDetailUiState> = _uiState.asStateFlow()
 
     private var sessionId: String? = null
+
+    /** A8 (#102): пары карточка+слот, для которых уже запущен коллектор [FrameUploadStatusObserver]. */
+    private val observedFrameKeys = mutableSetOf<String>()
+
+    init {
+        observeFrameResult()
+    }
 
     /**
      * Вызывается экраном с id из навигации. #71: больше не идемпотентна — вызов для уже
@@ -271,6 +300,117 @@ class SessionDetailViewModel @Inject constructor(
         }
     }
 
+    // --- A8 (#102): слоты кадров на карточке — вход в скрабер, прогресс заливки, снятие ---
+
+    private fun frameKey(cardId: String, slot: FrameSlot) = "$cardId:${slot.routeValue}"
+
+    /**
+     * Текущая стадия заливки конкретного слота карточки; нет активной работы — [UploadStage.None].
+     * Публичная — сигнатура совпадает с [FrameSlotActions.stageFor], экран передаёт метод
+     * напрямую (`viewModel::frameStageFor`).
+     */
+    fun frameStageFor(cardId: String, slot: FrameSlot): UploadStage =
+        _uiState.value.frameUploads[frameKey(cardId, slot)] ?: UploadStage.None
+
+    /**
+     * Запускает по коллектору [FrameUploadStatusObserver] на каждую пару карточка+слот, которую
+     * ещё не наблюдали. WorkManager хранит уникальную работу per `cardId+slot` (см.
+     * [FrameUploadScheduler.uniqueName]), поэтому подписка безопасна даже если заливки ещё не
+     * было — просто [UploadStage.None], пока тренер не выберет кадр.
+     */
+    private fun ensureFrameObservers(cards: List<InsightCard>) {
+        for (card in cards) {
+            for (slot in listOf(FrameSlot.BEFORE, FrameSlot.AFTER)) {
+                val key = frameKey(card.id, slot)
+                if (!observedFrameKeys.add(key)) continue
+                viewModelScope.launch {
+                    frameUploadStatusObserver.observe(card.id, slot).collect { stage ->
+                        _uiState.update { it.copy(frameUploads = it.frameUploads + (key to stage)) }
+                        // Заливка подтверждена сервером (attach) — перечитываем карточки, чтобы
+                        // забрать свежий frame_*_url (сервер — единственный источник правды).
+                        if (stage is UploadStage.Done) pollRefresh()
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * A6→A8: скрабер вернул JPEG — ставим заливку в очередь (A7); прогресс подхватит
+     * [ensureFrameObservers]. [FrameSelectionResult.selectedSeconds] намеренно не
+     * используется здесь: контракт A7 (`AttachFrameRequest`, [InsightsApi.attachFrame])
+     * не хранит таймкод выбранного кадра на сервере — только storagePath файла.
+     */
+    private fun onFrameSelected(result: FrameSelectionResult) {
+        frameUploadScheduler.enqueue(result.cardId, result.slot, result.jpegPath)
+    }
+
+    /**
+     * Читает [FrameSelectionResult], который `NivelNavHost` кладёт в `savedStateHandle`
+     * при возврате со скрабера (см. [FrameScrubberResultKeys]). Ключи сразу очищаются —
+     * иначе тот же результат подхватился бы повторно при следующей рекомпозиции/возврате
+     * на экран (навигационный `SavedStateHandle` переживает конфигурационные изменения).
+     */
+    private fun observeFrameResult() {
+        viewModelScope.launch {
+            savedStateHandle.getStateFlow<String?>(FrameScrubberResultKeys.JPEG_PATH, null).collect { jpegPath ->
+                if (jpegPath == null) return@collect
+                val cardId = savedStateHandle.get<String>(FrameScrubberResultKeys.CARD_ID)
+                val slot = FrameSlot.fromRouteValue(savedStateHandle.get<String>(FrameScrubberResultKeys.SLOT))
+                val selectedSeconds = savedStateHandle.get<Double>(FrameScrubberResultKeys.SELECTED_SECONDS) ?: 0.0
+                savedStateHandle[FrameScrubberResultKeys.JPEG_PATH] = null
+                savedStateHandle[FrameScrubberResultKeys.CARD_ID] = null
+                savedStateHandle[FrameScrubberResultKeys.SLOT] = null
+                savedStateHandle[FrameScrubberResultKeys.SELECTED_SECONDS] = null
+                if (cardId != null) {
+                    onFrameSelected(FrameSelectionResult(cardId, slot, jpegPath, selectedSeconds))
+                }
+            }
+        }
+    }
+
+    /**
+     * «Убрать» — оптимистично чистим URL слота на экране, шлём DELETE. При ошибке
+     * перечитываем карточки с сервера (тот же откат, что у [runCardAction]).
+     */
+    fun removeFrame(cardId: String, slot: FrameSlot) {
+        applyFrameUrl(cardId, slot, url = null)
+        viewModelScope.launch {
+            when (val result = insightsRepository.removeFrame(cardId, slot.routeValue)) {
+                is CardActionResult.Success -> Unit // уже применено оптимистично
+                is CardActionResult.Failure -> {
+                    _uiState.update { it.copy(cardActionError = result.message) }
+                    refresh()
+                }
+            }
+        }
+    }
+
+    /** Ручной повтор заливки кадра после провала — тот же файл, что уже сохранён на диске. */
+    fun retryFrameUpload(cardId: String, slot: FrameSlot) {
+        val stage = frameStageFor(cardId, slot) as? UploadStage.Failed ?: return
+        val filePath = stage.filePath ?: return
+        frameUploadScheduler.enqueue(cardId, slot, filePath)
+    }
+
+    /** Локально обновляет frame_*_url карточки в overview/reorderedCards без похода на сервер. */
+    private fun applyFrameUrl(cardId: String, slot: FrameSlot, url: String?) {
+        fun patch(list: List<InsightCard>) = list.map { card ->
+            if (card.id != cardId) card
+            else when (slot) {
+                FrameSlot.BEFORE -> card.copy(frameBeforeUrl = url)
+                FrameSlot.AFTER -> card.copy(frameAfterUrl = url)
+            }
+        }
+        _uiState.update { state ->
+            val overview = state.overview
+            state.copy(
+                overview = overview?.copy(cards = patch(overview.cards)),
+                reorderedCards = state.reorderedCards?.let(::patch),
+            )
+        }
+    }
+
     /** C5 — ручной повтор заливки после провала (берёт file_path из стадии Failed). */
     fun retryUpload() {
         val id = sessionId ?: return
@@ -315,6 +455,8 @@ class SessionDetailViewModel @Inject constructor(
             .onSuccess { overview ->
                 // Если сервер уже довёл анализ до ready — снимаем прежнюю ошибку генерации.
                 val clearGenError = overview.audio?.analysisStatus == "ready"
+                // A8 (#102): новые карточки (paste/generate/library) — сразу коллектор стадии заливки.
+                ensureFrameObservers(overview.cards)
                 _uiState.update { state ->
                     state.copy(
                         loading = if (updateSpinners) false else state.loading,

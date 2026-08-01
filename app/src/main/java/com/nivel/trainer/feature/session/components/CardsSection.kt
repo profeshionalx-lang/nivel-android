@@ -37,6 +37,7 @@ internal fun CardsSection(
     cards: List<InsightCard>,
     generating: Boolean,
     generateError: String?,
+    frameActions: FrameSlotActions,
     onGenerate: () -> Unit,
     onOpenPaste: () -> Unit,
     onOpenLibrary: () -> Unit,
@@ -79,6 +80,7 @@ internal fun CardsSection(
             if (drafts.isNotEmpty()) {
                 DraftReviewSection(
                     cards = drafts,
+                    frameActions = frameActions,
                     onApprove = onApproveCard,
                     onReject = onRejectCard,
                     onEdit = onEditCard,
@@ -90,6 +92,7 @@ internal fun CardsSection(
                     // D4: drag-and-drop список. Long-press активирует drag; отпускание фиксирует порядок.
                     DraggableCardList(
                         cards = approved,
+                        frameActions = frameActions,
                         onMoveCard = onMoveCard,
                         onDragEnd = onCardDragEnd,
                     )

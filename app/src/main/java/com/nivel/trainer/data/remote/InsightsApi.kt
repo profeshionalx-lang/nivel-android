@@ -1,6 +1,7 @@
 package com.nivel.trainer.data.remote
 
 import retrofit2.http.Body
+import retrofit2.http.DELETE
 import retrofit2.http.PATCH
 import retrofit2.http.POST
 import retrofit2.http.Path
@@ -61,5 +62,31 @@ interface InsightsApi {
     suspend fun updateCard(
         @Path("cardId") cardId: String,
         @Body body: UpdateCardRequest,
+    ): OkResponse
+
+    // --- A7 (#101): заливка кадра «до»/«после» (upload-url → PUT → attach) ---
+
+    /**
+     * Запросить signed upload URL для кадра (`…/frames/upload-url`, S5 #240).
+     * Trainer-only, владение карточкой проверяется на сервере (`guardCard`).
+     */
+    @POST("api/v1/cards/{cardId}/frames/upload-url")
+    suspend fun requestFrameUploadUrl(
+        @Path("cardId") cardId: String,
+        @Body body: FrameUploadUrlRequest,
+    ): FrameUploadUrlResponse
+
+    /** Привязать залитый кадр к слоту (`POST …/frames`, S5 #240). */
+    @POST("api/v1/cards/{cardId}/frames")
+    suspend fun attachFrame(
+        @Path("cardId") cardId: String,
+        @Body body: AttachFrameRequest,
+    ): OkResponse
+
+    /** Очистить слот кадра (`DELETE …/frames/{slot}`, S5 #240). Идемпотентен на сервере. */
+    @DELETE("api/v1/cards/{cardId}/frames/{slot}")
+    suspend fun deleteFrame(
+        @Path("cardId") cardId: String,
+        @Path("slot") slot: String,
     ): OkResponse
 }

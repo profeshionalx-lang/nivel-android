@@ -374,6 +374,38 @@ data class TranscribeResponse(
 )
 
 // -----------------------------------------------------------------------------
+// A7 (#101) — заливка кадра «до»/«после»: signed upload URL + привязка к слоту.
+// Контракт сверен по route-файлам NIVEL (S5, #240):
+//   POST /api/v1/cards/{id}/frames/upload-url  { slot, ext? } -> { uploadUrl, storagePath }
+//   POST /api/v1/cards/{id}/frames             { slot, storagePath } -> { ok }
+//   DELETE /api/v1/cards/{id}/frames/{slot}    -> { ok }
+// -----------------------------------------------------------------------------
+
+/** Тело `…/frames/upload-url`. `slot` — `"before"`/`"after"`, `ext` — всегда `jpg` на клиенте. */
+@Serializable
+data class FrameUploadUrlRequest(
+    val slot: String,
+    val ext: String = "jpg",
+)
+
+/**
+ * Ответ `…/frames/upload-url` (`requestFrameUploadUrlCore`): абсолютный Supabase
+ * signed-URL для прямого PUT кадра + путь в bucket `session-frames` для последующего attach.
+ */
+@Serializable
+data class FrameUploadUrlResponse(
+    val uploadUrl: String,
+    val storagePath: String,
+)
+
+/** Тело `…/frames` (attach): слот + путь, полученный из upload-url. */
+@Serializable
+data class AttachFrameRequest(
+    val slot: String,
+    val storagePath: String,
+)
+
+// -----------------------------------------------------------------------------
 // B6 (#9) — карточка тренировки (просмотр): детали + статус аудио + карточки.
 // Контракт сверен по route-файлам NIVEL: sessions/[id], .../transcript/status,
 // .../insight-cards (core: getSessionDetailCore, getTranscriptStatusCore,

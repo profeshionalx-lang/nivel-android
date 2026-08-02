@@ -161,19 +161,12 @@ private fun FrameSlotBox(
                 SlotCaption(text = label, modifier = Modifier.align(Alignment.BottomStart))
             }
 
-            // Заливка подтверждена сервером (WorkManager Done), но карточка ещё не
-            // перечитана — свежий frame_*_url ещё не пришёл (см. awaitFrameUrl в
-            // SessionDetailViewModel). Без этой ветки слот на несколько секунд
-            // выглядел как «пусто, можно выбрать» — тренер думал, что кадр потерялся.
-            stage is UploadStage.Done && effectiveUrl == null -> {
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator(color = Primary, modifier = Modifier.size(28.dp))
-                }
-                SlotCaption(text = "Сохраняем…", modifier = Modifier.align(Alignment.BottomStart))
-            }
-
             // Шаг 6: URL был, но не загрузился (протухший signed-URL из Room-кэша) —
             // отличаем от «кадра никогда не было»: тап перечитывает обзор с сервера.
+            // Проверяем раньше ветки Done ниже — иначе старая карточка с уже
+            // подтверждённой (Done) но протухшей ссылкой навсегда зависала бы в
+            // спиннере «Сохраняем…», т.к. WorkManager хранит SUCCEEDED бессрочно
+            // и awaitFrameUrl не перезапускается для уже присутствующего frameUrl.
             frameUrl != null && urlBroken -> {
                 Box(
                     modifier = Modifier
@@ -192,6 +185,19 @@ private fun FrameSlotBox(
                     }
                 }
                 SlotCaption(text = label, modifier = Modifier.align(Alignment.BottomStart))
+            }
+
+            // Заливка подтверждена сервером (WorkManager Done), но карточка ещё не
+            // перечитана — свежий frame_*_url ещё не пришёл (см. awaitFrameUrl в
+            // SessionDetailViewModel). Без этой ветки слот на несколько секунд
+            // выглядел как «пусто, можно выбрать» — тренер думал, что кадр потерялся.
+            // Условие именно по frameUrl (а не effectiveUrl) — иначе протухший URL
+            // (urlBroken=true) снова попадал бы сюда вместо ветки выше.
+            stage is UploadStage.Done && frameUrl == null -> {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator(color = Primary, modifier = Modifier.size(28.dp))
+                }
+                SlotCaption(text = "Сохраняем…", modifier = Modifier.align(Alignment.BottomStart))
             }
 
             // Кадр уже приложен и подтверждён сервером — миниатюра + заменить/убрать.

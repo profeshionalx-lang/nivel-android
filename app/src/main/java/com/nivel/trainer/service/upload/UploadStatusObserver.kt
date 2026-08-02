@@ -31,8 +31,10 @@ sealed interface UploadStage {
     /**
      * Заливка провалилась окончательно (исчерпаны ретраи / постоянный сбой).
      * [filePath] (если есть) — для ручного повтора через [AudioUploadScheduler.retry].
+     * [reason] — причина сбоя (`UploadOutcome.reason`), для аудио пока не прокидывается
+     * (дефолт `null`); заливка кадра ([FrameUploadStatusObserver]) её заполняет.
      */
-    data class Failed(val filePath: String?) : UploadStage
+    data class Failed(val filePath: String?, val reason: String? = null) : UploadStage
 
     /** Заливка успешно завершена — дальше статус ведёт транскрипт (B6). */
     data object Done : UploadStage

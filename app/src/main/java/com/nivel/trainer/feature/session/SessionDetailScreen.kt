@@ -98,6 +98,8 @@ fun SessionDetailScreen(
         onPick = onOpenScrubber,
         onRemove = viewModel::removeFrame,
         onRetry = viewModel::retryFrameUpload,
+        // Шаг 6: протухший signed-URL из кэша — тап перечитывает обзор сессии.
+        onRefresh = viewModel::refresh,
     )
 
     SessionDetailContent(
@@ -113,6 +115,7 @@ fun SessionDetailScreen(
         reorderedCards = state.reorderedCards,
         isOffline = state.isOffline,
         cardActionError = state.cardActionError,
+        frameError = state.frameError,
         localVideo = state.localVideo,
         frameActions = frameActions,
         onGenerate = viewModel::generateInsights,
@@ -126,6 +129,7 @@ fun SessionDetailScreen(
         onRejectCard = viewModel::rejectCard,
         onEditCard = viewModel::openEditSheet,
         onDismissCardActionError = viewModel::dismissCardActionError,
+        onDismissFrameError = viewModel::dismissFrameError,
         onBack = onBack,
         onRecord = onRecord,
         onRetry = viewModel::refresh,
@@ -204,6 +208,8 @@ internal fun SessionDetailContent(
     reorderedCards: List<com.nivel.trainer.domain.InsightCard>? = null,
     isOffline: Boolean = false,
     cardActionError: String? = null,
+    /** Fix «после загрузки не сохраняется выбранный кадр» — баннер провала заливки кадра. */
+    frameError: String? = null,
     localVideo: LocalVideoUiState = LocalVideoUiState.None,
     frameActions: FrameSlotActions = FrameSlotActions(
         hasLocalVideo = false,
@@ -225,6 +231,7 @@ internal fun SessionDetailContent(
     onRejectCard: (String) -> Unit = {},
     onEditCard: (com.nivel.trainer.domain.InsightCard) -> Unit = {},
     onDismissCardActionError: () -> Unit = {},
+    onDismissFrameError: () -> Unit = {},
     onDeleteVideo: () -> Unit = {},
     onDismissVideoError: () -> Unit = {},
 ) {
@@ -304,6 +311,15 @@ internal fun SessionDetailContent(
         CompleteReviewErrorBanner(
             message = cardActionError,
             onDismiss = onDismissCardActionError,
+        )
+    }
+
+    // Fix «после загрузки не сохраняется выбранный кадр» — провал заливки кадра,
+    // тот же переиспользуемый баннер-паттерн (см. ErrorBanner/CompleteReviewErrorBanner).
+    if (frameError != null) {
+        CompleteReviewErrorBanner(
+            message = frameError,
+            onDismiss = onDismissFrameError,
         )
     }
 }

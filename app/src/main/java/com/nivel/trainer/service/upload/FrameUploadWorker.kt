@@ -55,10 +55,12 @@ class FrameUploadWorker @AssistedInject constructor(
         return when (outcome) {
             is UploadOutcome.Success -> Result.success()
             // На провале возвращаем cardId/slot/filePath в outputData, чтобы UI (#102)
-            // мог предложить ручной повтор — переenqueue того же слота и файла.
-            is UploadOutcome.PermanentFailure -> Result.failure(failureData(cardId, slotValue, filePath))
+            // мог предложить ручной повтор — переenqueue того же слота и файла. reason
+            // (fix «после загрузки не сохраняется выбранный кадр», причина B) — чтобы
+            // UI мог показать ЧТО пошло не так, а не только «попробуйте ещё раз».
+            is UploadOutcome.PermanentFailure -> Result.failure(failureData(cardId, slotValue, filePath, outcome.reason))
             is UploadOutcome.Retry ->
-                if (runAttemptCount >= MAX_ATTEMPTS) Result.failure(failureData(cardId, slotValue, filePath))
+                if (runAttemptCount >= MAX_ATTEMPTS) Result.failure(failureData(cardId, slotValue, filePath, outcome.reason))
                 else Result.retry()
         }
     }
@@ -66,8 +68,8 @@ class FrameUploadWorker @AssistedInject constructor(
     private fun progressData(percent: Int) =
         workDataOf(KEY_PROGRESS to percent.coerceIn(0, 100))
 
-    private fun failureData(cardId: String, slotValue: String, filePath: String) =
-        workDataOf(KEY_CARD_ID to cardId, KEY_SLOT to slotValue, KEY_FILE_PATH to filePath)
+    private fun failureData(cardId: String, slotValue: String, filePath: String, reason: String?) =
+        workDataOf(KEY_CARD_ID to cardId, KEY_SLOT to slotValue, KEY_FILE_PATH to filePath, KEY_ERROR to reason)
 
     private fun foregroundInfo(): ForegroundInfo {
         ensureChannel()
@@ -108,6 +110,9 @@ class FrameUploadWorker @AssistedInject constructor(
 
         /** Прогресс заливки 0..100 % в [androidx.work.WorkInfo.getProgress]. */
         const val KEY_PROGRESS = "progress_percent"
+
+        /** Причина финального сбоя (`UploadOutcome.reason`) — для [UploadStage.Failed.reason]. */
+        const val KEY_ERROR = "error_reason"
 
         private const val MAX_ATTEMPTS = 5
         private const val CHANNEL_ID = "frame-upload"

@@ -13,6 +13,7 @@ import com.nivel.trainer.domain.InsightCard
 import com.nivel.trainer.domain.SessionOverview
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
+import retrofit2.HttpException
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -83,8 +84,19 @@ class DefaultSessionDetailRepository @Inject constructor(
             runCatching { api.getSessionTranscriptStatus(sessionId).toDomain() }.getOrNull()
         }
         val cardsDeferred = async {
-            runCatching { api.getSessionCards(sessionId).cards.map { it.toDomain(sessionId) } }
-                .getOrDefault(emptyList())
+            // Шаг 6 (fix «после загрузки не сохраняется выбранный кадр», причина B):
+            // раньше ЛЮБОЙ сбой (таймаут, 500, разрыв соединения — не только «карточек ещё
+            // нет») тихо превращался в пустой список через getOrDefault. getOverview() видел
+            // networkResult как Success и КЭШИРОВАЛ пустой список карточек поверх кэша с
+            // реальными данными — тренер открывал сессию и видел, что все карточки и кадры
+            // «пропали». 404 (карточек действительно ещё нет) — единственный законный случай
+            // пустого списка; остальное должно провалить весь fetchFromNetwork, чтобы
+            // getOverview() откатился на Room-кэш вместо кэширования пустоты.
+            try {
+                api.getSessionCards(sessionId).cards.map { it.toDomain(sessionId) }
+            } catch (e: HttpException) {
+                if (e.code() == 404) emptyList() else throw e
+            }
         }
         SessionOverview(
             detail = detailDeferred.await().toDomain(),

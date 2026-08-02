@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -95,6 +96,44 @@ fun OfflineBanner(
             modifier = Modifier.heightIn(min = TouchTarget),
         ) {
             Text("Обновить", color = Primary, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+        }
+    }
+}
+
+/**
+ * Общий баннер-ошибка поверх контента (как toast). Закрывается крестиком, не блокирует
+ * скролл под собой. Изначально появился как `CompleteReviewErrorBanner` (D5, #23) —
+ * вынесен сюда как переиспользуемый примитив (fix «после загрузки не сохраняется
+ * выбранный кадр»), чтобы скрабер кадра (A6) и другие экраны не плодили копии разметки.
+ */
+@Composable
+fun ErrorBanner(message: String, onDismiss: () -> Unit, modifier: Modifier = Modifier) {
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .padding(16.dp),
+        contentAlignment = Alignment.BottomCenter,
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(ErrorColor.copy(alpha = 0.9f), RoundedCornerShape(12.dp))
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(
+                text = message,
+                color = Color.White,
+                fontSize = 13.sp,
+                modifier = Modifier.weight(1f),
+            )
+            IconButton(
+                onClick = onDismiss,
+                modifier = Modifier.size(TouchTarget),
+            ) {
+                Text("✕", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+            }
         }
     }
 }

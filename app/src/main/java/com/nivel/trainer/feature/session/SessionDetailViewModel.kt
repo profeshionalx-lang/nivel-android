@@ -26,6 +26,7 @@ import com.nivel.trainer.service.upload.UploadStatusObserver
 import com.nivel.trainer.ui.state.isNetworkError
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -211,6 +212,15 @@ data class SessionDetailUiState(
      * Отсутствие ключа = [UploadStage.None] (см. [SessionDetailViewModel.frameStageFor]).
      */
     val frameUploads: Map<String, UploadStage> = emptyMap(),
+    /**
+     * Fix «после загрузки не сохраняется выбранный кадр»: заливка кадра может провалиться
+     * (см. [UploadStage.Failed]) далеко за пределами того момента, когда тренер смотрел
+     * именно на этот слот (сеть пропала, экран уже проскроллен) — раньше единственный
+     * сигнал был мелкая иконка ⚠ внутри самого слота, легко теряющаяся в списке карточек.
+     * Баннер показывается один раз на ПЕРЕХОДЕ не-Failed → Failed (см. [previousFrameStages]),
+     * не на каждый ре-коллект состояния, иначе он бы переоткрывался после закрытия крестиком.
+     */
+    val frameError: String? = null,
 )
 
 /**
@@ -249,6 +259,17 @@ class SessionDetailViewModel @Inject constructor(
 
     /** A8 (#102): пары карточка+слот, для которых уже запущен коллектор [FrameUploadStatusObserver]. */
     private val observedFrameKeys = mutableSetOf<String>()
+
+    /**
+     * Fix «после загрузки не сохраняется выбранный кадр»: джобы [awaitFrameUrl] по ключу
+     * `frameKey` — дедуп (Done может прилететь из наблюдателя больше одного раза) и отмена
+     * предыдущего ожидания при новом выборе/повторе кадра для того же слота (иначе старая
+     * джоба и новая гонятся за одним и тем же URL параллельно).
+     */
+    private val frameSyncJobs = mutableMapOf<String, Job>()
+
+    /** Прошлая стадия заливки per ключ — нужна только чтобы поймать переход `!Failed → Failed` (см. [frameError]). */
+    private val previousFrameStages = mutableMapOf<String, UploadStage>()
 
     init {
         observeFrameResult()
@@ -336,13 +357,72 @@ class SessionDetailViewModel @Inject constructor(
                 if (!observedFrameKeys.add(key)) continue
                 viewModelScope.launch {
                     frameUploadStatusObserver.observe(card.id, slot).collect { stage ->
+                        val previous = previousFrameStages[key]
+                        previousFrameStages[key] = stage
                         _uiState.update { it.copy(frameUploads = it.frameUploads + (key to stage)) }
-                        // Заливка подтверждена сервером (attach) — перечитываем карточки, чтобы
-                        // забрать свежий frame_*_url (сервер — единственный источник правды).
-                        if (stage is UploadStage.Done) pollRefresh()
+                        when {
+                            // Заливка подтверждена сервером (attach) — раньше тут был безусловный
+                            // одноразовый pollRefresh(); один тихий поллинг мог прилететь РАНЬШЕ,
+                            // чем сервер закоммитил frame_*_url (гонка), и карточка навсегда
+                            // оставалась «пустой», хотя вложение уже произошло (главная причина
+                            // бага «после загрузки не сохраняется выбранный кадр»). Теперь —
+                            // устойчивое ожидание с повторами (см. [awaitFrameUrl]).
+                            stage is UploadStage.Done -> awaitFrameUrl(card.id, slot, key)
+                            // Показываем баннер только на переходе в Failed, не при каждом
+                            // ре-коллекте (тот же WorkInfo может переиздаться без изменений).
+                            stage is UploadStage.Failed && previous !is UploadStage.Failed ->
+                                _uiState.update { it.copy(frameError = frameFailureMessage(slot, stage.reason)) }
+                            else -> Unit
+                        }
                     }
                 }
             }
+        }
+    }
+
+    /** Текст баннера провала заливки кадра (см. [frameError]). */
+    private fun frameFailureMessage(slot: FrameSlot, reason: String?): String {
+        val slotLabel = if (slot == FrameSlot.BEFORE) "«до»" else "«после»"
+        val base = "Не удалось загрузить кадр $slotLabel. Нажмите на слот, чтобы повторить."
+        // 4xx (`PUT 400`, `attach 404`…) — сервер отверг файл, а не сеть подвела; ретрай
+        // того же файла бесполезен, тренеру нужно выбрать кадр заново.
+        val looksLikeClientRejection = reason != null && Regex("\\b4\\d{2}\\b").containsMatchIn(reason)
+        return if (looksLikeClientRejection) "$base Сервер отклонил файл — выберите кадр заново." else base
+    }
+
+    fun dismissFrameError() {
+        _uiState.update { it.copy(frameError = null) }
+    }
+
+    /**
+     * Устойчивое дочитывание frame_*_url после `UploadStage.Done` (fix «после загрузки не
+     * сохраняется выбранный кадр», причина A: одноразовый poll мог обогнать сервер).
+     * До 5 попыток с экспоненциальным backoff (1/2/4/8/15с); дедуп/отмена — [frameSyncJobs].
+     * Ранний выход, если url уже есть (например, его принёс параллельный [refresh]).
+     */
+    private fun awaitFrameUrl(cardId: String, slot: FrameSlot, key: String) {
+        if (frameUrlFor(cardId, slot) != null) return
+        frameSyncJobs[key]?.cancel()
+        frameSyncJobs[key] = viewModelScope.launch {
+            val id = sessionId ?: return@launch
+            for (delayMs in FRAME_SYNC_BACKOFF_MS) {
+                delay(delayMs)
+                fetchOverview(id, updateSpinners = false)
+                if (frameUrlFor(cardId, slot) != null) return@launch
+            }
+            _uiState.update {
+                it.copy(frameError = "Не удалось получить сохранённый кадр с сервера. Потяните экран вниз, чтобы обновить.")
+            }
+        }
+    }
+
+    /** Текущий frame_*_url карточки+слота из уже показанного состояния (overview/reorderedCards). */
+    private fun frameUrlFor(cardId: String, slot: FrameSlot): String? {
+        val cards = _uiState.value.reorderedCards ?: _uiState.value.overview?.cards ?: return null
+        val card = cards.find { it.id == cardId } ?: return null
+        return when (slot) {
+            FrameSlot.BEFORE -> card.frameBeforeUrl
+            FrameSlot.AFTER -> card.frameAfterUrl
         }
     }
 
@@ -353,6 +433,9 @@ class SessionDetailViewModel @Inject constructor(
      * не хранит таймкод выбранного кадра на сервере — только storagePath файла.
      */
     private fun onFrameSelected(result: FrameSelectionResult) {
+        // Новый выбор для этого слота — отменяем прошлое ожидание url (иначе две джобы
+        // гонятся за разными файлами одного ключа).
+        frameSyncJobs.remove(frameKey(result.cardId, result.slot))?.cancel()
         frameUploadScheduler.enqueue(result.cardId, result.slot, result.jpegPath)
     }
 
@@ -386,6 +469,13 @@ class SessionDetailViewModel @Inject constructor(
      */
     fun removeFrame(cardId: String, slot: FrameSlot) {
         applyFrameUrl(cardId, slot, url = null)
+        // Стадия заливки предыдущего успешного апа (Done) иначе осталась бы в
+        // frameUploads навсегда — слот в FrameSlotRow держал бы вечный спиннер
+        // «Сохраняем…» вместо «Выбрать кадр» (регрессия, найденная при этом фиксе).
+        val key = frameKey(cardId, slot)
+        frameSyncJobs.remove(key)?.cancel()
+        previousFrameStages.remove(key)
+        _uiState.update { it.copy(frameUploads = it.frameUploads + (key to UploadStage.None)) }
         viewModelScope.launch {
             when (val result = insightsRepository.removeFrame(cardId, slot.routeValue)) {
                 is CardActionResult.Success -> Unit // уже применено оптимистично
@@ -401,6 +491,7 @@ class SessionDetailViewModel @Inject constructor(
     fun retryFrameUpload(cardId: String, slot: FrameSlot) {
         val stage = frameStageFor(cardId, slot) as? UploadStage.Failed ?: return
         val filePath = stage.filePath ?: return
+        frameSyncJobs.remove(frameKey(cardId, slot))?.cancel()
         frameUploadScheduler.enqueue(cardId, slot, filePath)
     }
 
@@ -461,9 +552,26 @@ class SessionDetailViewModel @Inject constructor(
         viewModelScope.launch { fetchOverview(id, updateSpinners = false) }
     }
 
-    private suspend fun fetchOverview(id: String, updateSpinners: Boolean) {
-        repository.getOverview(id)
-            .onSuccess { overview ->
+    /**
+     * Возвращает `true`, если данные реально пришли с сервера (не устаревший кэш) —
+     * [awaitFrameUrl] использует это, чтобы понять, стоит ли доверять отсутствию url
+     * в этом конкретном ответе, или это просто offline-fallback (см. ниже).
+     */
+    private suspend fun fetchOverview(id: String, updateSpinners: Boolean): Boolean {
+        val result = repository.getOverview(id)
+        return result.fold(
+            onSuccess = { overview ->
+                // Fix «после загрузки не сохраняется выбранный кадр», причина B: тихий
+                // автополлинг мог получить offline-fallback (`isStale=true`, Room-кэш —
+                // см. SessionDetailRepository) СТАРЕЕ уже показанного overview (например,
+                // кэш ещё не видел только что подтверждённый frame_*_url) и затирал
+                // свежие данные устаревшими. Пока это тихий поллинг и на экране уже что-то
+                // есть — обновляем только оффлайн-флаг, а не сам overview.
+                val skipStaleOverwrite = !updateSpinners && overview.isStale && _uiState.value.overview != null
+                if (skipStaleOverwrite) {
+                    _uiState.update { it.copy(isOffline = true) }
+                    return@fold false
+                }
                 // Если сервер уже довёл анализ до ready — снимаем прежнюю ошибку генерации.
                 val clearGenError = overview.audio?.analysisStatus == "ready"
                 // A8 (#102): новые карточки (paste/generate/library) — сразу коллектор стадии заливки.
@@ -478,9 +586,10 @@ class SessionDetailViewModel @Inject constructor(
                         isOffline = overview.isStale, // G3: флаг кэша
                     )
                 }
-            }
-            .onFailure { e ->
-                if (!updateSpinners) return@onFailure // тихий автополлинг: не трогаем видимое состояние
+                !overview.isStale
+            },
+            onFailure = { e ->
+                if (!updateSpinners) return@fold false // тихий автополлинг: не трогаем видимое состояние
                 _uiState.update { state ->
                     state.copy(
                         loading = false,
@@ -488,7 +597,9 @@ class SessionDetailViewModel @Inject constructor(
                         error = if (state.overview == null) mapError(e) else state.error,
                     )
                 }
-            }
+                false
+            },
+        )
     }
 
     // --- D2: ручная вставка инсайтов ---
@@ -927,3 +1038,6 @@ class SessionDetailViewModel @Inject constructor(
         else -> e.message?.takeIf { it.isNotBlank() } ?: "Что-то пошло не так. Попробуйте снова."
     }
 }
+
+/** Backoff [awaitFrameUrl]'а — 1/2/4/8/15с, до 5 попыток дочитать frame_*_url после Done. */
+private val FRAME_SYNC_BACKOFF_MS = listOf(1_000L, 2_000L, 4_000L, 8_000L, 15_000L)

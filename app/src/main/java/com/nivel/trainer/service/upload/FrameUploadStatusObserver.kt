@@ -41,7 +41,10 @@ class FrameUploadStatusObserver @Inject constructor(
                 UploadStage.Uploading(percent.coerceIn(0, 100))
             }
             WorkInfo.State.FAILED ->
-                UploadStage.Failed(info.outputData.getString(FrameUploadWorker.KEY_FILE_PATH))
+                UploadStage.Failed(
+                    filePath = info.outputData.getString(FrameUploadWorker.KEY_FILE_PATH),
+                    reason = info.outputData.getString(FrameUploadWorker.KEY_ERROR),
+                )
             WorkInfo.State.SUCCEEDED -> UploadStage.Done
             WorkInfo.State.CANCELLED -> UploadStage.None
         }

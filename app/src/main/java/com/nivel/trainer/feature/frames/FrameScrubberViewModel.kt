@@ -40,9 +40,16 @@ sealed interface FrameScrubberUiState {
         val windowEndMs: Long,
         val selectedTimeMs: Long,
         val filmstrip: List<FilmstripFrame> = emptyList(),
+        // Плотный кэш линейного разбора (#117, шаг FrameWindow.SCAN_STEP_MS) — по нему
+        // скраб слайдера ищет ближайший готовый кадр во время перетаскивания, без единого
+        // обращения к ретриверу на каждое микродвижение пальца.
+        val scanCache: List<CachedScrubFrame> = emptyList(),
         val buildingFilmstrip: Boolean = true,
         val buildProgress: Pair<Int, Int>? = null,
         val previewBitmap: Bitmap? = null,
+        // false — previewBitmap это приближённый кадр кэша скана (во время перетаскивания)
+        // или мгновенный плейсхолдер при открытии окна, не то, что должно уехать в файл.
+        val previewIsExact: Boolean = false,
         val previewLoading: Boolean = false,
         val expanded: Boolean = false,
         val saving: Boolean = false,
@@ -70,10 +77,15 @@ sealed interface FrameScrubberUiState {
  *    сервер не уезжает (эпик NIVEL#235), поэтому источник ровно один — телефон.
  *  - [FrameSourceFactory] — декод кадров, за интерфейсом (план Б — ExoPlayer).
  *
- * Память/декодеры: [job] (плёнка) живёт в [viewModelScope] — [onCleared] отменяет его
- * структурной конкурентностью, `finally` в [FrameSource] отпускает `MediaMetadataRetriever`
- * при отмене так же, как и при обычном завершении. Уход с экрана посреди построения
- * плёнки не оставляет «горячих» декодеров (acceptance issue #100).
+ * Память/декодеры: [scanJob] (линейный разбор окна, #117) живёт в [viewModelScope] —
+ * [onCleared] отменяет его структурной конкурентностью, `finally` в [FrameSource] отпускает
+ * нативные ресурсы при отмене так же, как и при обычном завершении. Уход с экрана посреди
+ * разбора не оставляет «горячих» декодеров (acceptance issue #100/#117).
+ *
+ * Скраб слайдера (#117) — во время перетаскивания [onSliderDragging] берёт ближайший
+ * готовый кадр из уже насканенного окна (мгновенно, без обращения к диску), точный кадр
+ * (`OPTION_CLOSEST`) декодируется только при отпускании ([onSliderReleased]) или тапе по
+ * миниатюре ([onThumbnailSelected]) — там, где секундная неточность уже недопустима.
  */
 @HiltViewModel
 class FrameScrubberViewModel @Inject constructor(
@@ -89,7 +101,7 @@ class FrameScrubberViewModel @Inject constructor(
     private var frameSource: FrameSource? = null
     private var videoRecord: VideoRecord? = null
     private var momentSeconds: Double? = null
-    private var filmstripJob: Job? = null
+    private var scanJob: Job? = null
     private var previewJob: Job? = null
 
     private var loaded = false
@@ -162,61 +174,129 @@ class FrameScrubberViewModel @Inject constructor(
     }
 
     private fun openWindow(window: LongRange, expanded: Boolean, initialSelection: Long) {
-        filmstripJob?.cancel()
+        scanJob?.cancel()
         _state.value = FrameScrubberUiState.Ready(
             windowStartMs = window.first,
             windowEndMs = window.last,
             selectedTimeMs = initialSelection,
             buildingFilmstrip = true,
+            previewLoading = true,
             expanded = expanded,
         )
-        requestPreview(initialSelection)
         val source = frameSource ?: return
-        filmstripJob = viewModelScope.launch {
-            val built = mutableListOf<FilmstripFrame>()
-            source.buildFilmstrip(
+        val totalTicks = ((window.last - window.first) / FrameWindow.SCAN_STEP_MS + 1).toInt().coerceAtLeast(1)
+        scanJob = viewModelScope.launch {
+            val cache = mutableListOf<CachedScrubFrame>()
+            var lastFilmstripMs = window.first - FrameWindow.THUMBNAIL_STEP_MS // первый кадр всегда попадает в плёнку
+            var placeholderShown = false
+            source.scanWindow(
                 startMs = window.first,
                 endMs = window.last,
-                stepMs = FrameWindow.THUMBNAIL_STEP_MS,
-                thumbnailWidthPx = THUMBNAIL_WIDTH_PX,
-            ) { doneCount, total ->
+                stepMs = FrameWindow.SCAN_STEP_MS,
+                targetWidthPx = SCAN_WIDTH_PX,
+            ) { frame ->
+                cache += frame
+                val onFilmstripTick = frame.timeMs - lastFilmstripMs >= FrameWindow.THUMBNAIL_STEP_MS
+                // Плёнка держит десятки raw Bitmap'ов на весь срок жизни окна (не JPEG, как
+                // scanCache) — декодируем в её собственном, заметно более узком разрешении,
+                // а не в SCAN_WIDTH_PX (тот рассчитан на крупное превью при драге, не на
+                // ряд миниатюр по 64dp — раздувать его сюда было бы чистой тратой памяти).
+                val filmstripFrame = if (onFilmstripTick) decodeFilmstripBitmap(frame)?.let { FilmstripFrame(frame.timeMs, it) } else null
+                if (filmstripFrame != null) lastFilmstripMs = frame.timeMs
                 _state.update { current ->
                     if (current !is FrameScrubberUiState.Ready) return@update current
-                    current.copy(buildProgress = doneCount to total)
+                    var next = current.copy(
+                        scanCache = cache.toList(),
+                        filmstrip = if (filmstripFrame != null) current.filmstrip + filmstripFrame else current.filmstrip,
+                        buildProgress = cache.size to totalTicks,
+                    )
+                    // Мгновенный плейсхолдер (issue: даже с предзагрузкой первый кадр не появляется
+                    // мгновенно) — как только скан проходит рядом с выбранной позицией, показываем
+                    // его, не дожидаясь окончания всего окна; точный кадр придёт следом отдельно.
+                    if (!placeholderShown && kotlin.math.abs(frame.timeMs - initialSelection) <= FrameWindow.SCAN_STEP_MS) {
+                        placeholderShown = true
+                        next = next.copy(previewBitmap = frame.decode(), previewIsExact = false)
+                    }
+                    next
                 }
-            }.let { built.addAll(it) }
+            }
             _state.update { current ->
                 if (current !is FrameScrubberUiState.Ready) return@update current
-                current.copy(filmstrip = built, buildingFilmstrip = false, buildProgress = null)
+                current.copy(buildingFilmstrip = false, buildProgress = null)
             }
+            requestExactPreview(initialSelection)
         }
     }
 
     /** Тап по миниатюре плёнки — сразу точный тайминг этого кадра (issue: должен совпасть с превью). */
-    fun onThumbnailSelected(timeMs: Long) = selectTime(timeMs)
+    fun onThumbnailSelected(timeMs: Long) = selectExact(timeMs)
 
-    /** Слайдер точной подстройки — тот же путь выбора, просто источник времени другой. */
-    fun onSliderChanged(timeMs: Long) = selectTime(timeMs)
-
-    private fun selectTime(timeMs: Long) {
+    /**
+     * Движение слайдера ВО ВРЕМЯ перетаскивания (#117) — берёт ближайший уже насканенный
+     * кадр из кэша окна ([FrameScrubberUiState.Ready.scanCache]), без обращения к диску:
+     * никакого спиннера, реакция мгновенная. Точный кадр — только при отпускании
+     * ([onSliderReleased]), см. класс-докблок.
+     */
+    fun onSliderDragging(timeMs: Long) {
         val ready = _state.value as? FrameScrubberUiState.Ready ?: return
         val clamped = timeMs.coerceIn(ready.windowStartMs, ready.windowEndMs)
         // Новый выбор кадра — прошлая ошибка сохранения больше не актуальна.
         _state.value = ready.copy(selectedTimeMs = clamped, saveError = null)
-        requestPreview(clamped)
+        val cached = nearestCachedFrame(ready.scanCache, clamped) ?: return
+        previewJob?.cancel()
+        previewJob = viewModelScope.launch(Dispatchers.Default) {
+            val bitmap = cached.decode() ?: return@launch
+            _state.update { current ->
+                if (current !is FrameScrubberUiState.Ready || current.selectedTimeMs != clamped) return@update current
+                current.copy(previewBitmap = bitmap, previewIsExact = false, previewLoading = false)
+            }
+        }
     }
 
-    private fun requestPreview(timeMs: Long) {
+    /** Слайдер отпущен — точный кадр этой позиции (issue: не ближайший опорный, честный `OPTION_CLOSEST`). */
+    fun onSliderReleased(timeMs: Long) = selectExact(timeMs)
+
+    private fun selectExact(timeMs: Long) {
+        val ready = _state.value as? FrameScrubberUiState.Ready ?: return
+        val clamped = timeMs.coerceIn(ready.windowStartMs, ready.windowEndMs)
+        // Новый выбор кадра — прошлая ошибка сохранения больше не актуальна.
+        _state.value = ready.copy(selectedTimeMs = clamped, saveError = null)
+        requestExactPreview(clamped)
+    }
+
+    private fun requestExactPreview(timeMs: Long) {
         val source = frameSource ?: return
         previewJob?.cancel()
+        // previewBitmap НЕ сбрасываем — уже показанный кэш-кадр/плейсхолдер остаётся на
+        // экране под спиннером, а не пропадает в чёрный экран на время точного декода.
         _state.update { current -> if (current is FrameScrubberUiState.Ready) current.copy(previewLoading = true) else current }
         previewJob = viewModelScope.launch {
             val bitmap = source.exactFrameAt(timeMs)
             _state.update { current ->
                 if (current !is FrameScrubberUiState.Ready || current.selectedTimeMs != timeMs) return@update current
-                current.copy(previewBitmap = bitmap, previewLoading = false)
+                if (bitmap != null) {
+                    current.copy(previewBitmap = bitmap, previewIsExact = true, previewLoading = false)
+                } else {
+                    current.copy(previewLoading = false) // не удалось — оставляем последний показанный кадр как есть
+                }
             }
         }
+    }
+
+    /** Ближайший по времени готовый кадр кэша скана — линейный поиск: кэш ≤~130 кадров, дёшево. */
+    private fun nearestCachedFrame(cache: List<CachedScrubFrame>, timeMs: Long): CachedScrubFrame? =
+        cache.minByOrNull { kotlin.math.abs(it.timeMs - timeMs) }
+
+    /** JPEG кэша (SCAN_WIDTH_PX) декодируем и сразу уменьшаем до узкой ширины плёнки — держать
+     * в [FrameScrubberUiState.Ready.filmstrip] десятки raw Bitmap'ов в полном SCAN_WIDTH_PX
+     * не нужно, миниатюра рисуется на 64dp. */
+    private fun decodeFilmstripBitmap(frame: CachedScrubFrame): Bitmap? {
+        val full = frame.decode() ?: return null
+        if (full.width <= FILMSTRIP_WIDTH_PX) return full
+        val height = (full.height.toDouble() / full.width * FILMSTRIP_WIDTH_PX).roundToInt().coerceAtLeast(1)
+        val scaled = Bitmap.createScaledBitmap(full, FILMSTRIP_WIDTH_PX, height, true)
+        if (scaled !== full) full.recycle()
+        return scaled
     }
 
     /**
@@ -244,7 +324,10 @@ class FrameScrubberViewModel @Inject constructor(
         if (ready.saving) return
         _state.update { (it as? FrameScrubberUiState.Ready ?: return@update it).copy(saving = true, saveError = null) }
         viewModelScope.launch {
-            val bitmap = ready.previewBitmap ?: source.exactFrameAt(ready.selectedTimeMs)
+            // previewBitmap может быть приближённым кадром кэша скана (previewIsExact=false,
+            // если тренер успел нажать «Выбрать кадр» до прихода точного) — в файл должен
+            // уйти именно OPTION_CLOSEST, не кэш (issue #117, acceptance: полное качество).
+            val bitmap = ready.previewBitmap.takeIf { ready.previewIsExact } ?: source.exactFrameAt(ready.selectedTimeMs)
             if (bitmap == null) {
                 _state.update {
                     (it as? FrameScrubberUiState.Ready ?: return@update it)
@@ -309,14 +392,23 @@ class FrameScrubberViewModel @Inject constructor(
 
     override fun onCleared() {
         super.onCleared()
-        filmstripJob?.cancel()
+        scanJob?.cancel()
         previewJob?.cancel()
         frameSource?.release()
         frameSource = null
     }
 
     private companion object {
-        const val THUMBNAIL_WIDTH_PX = 320
+        // Ширина кадров кэша скана (#117) — компромисс качество/память: JPEG ~470px в
+        // памяти держит окно из ~100 кадров единицами мегабайт (см. FrameSource docblock),
+        // достаточно чётко для превью во время активного перетаскивания.
+        const val SCAN_WIDTH_PX = 480
+
+        // Плёнка миниатюр рисуется на 64dp (ThumbnailWidth в Screen) — держать raw Bitmap'ы
+        // на весь срок жизни окна в SCAN_WIDTH_PX было бы 2.25x лишней памяти без всякой
+        // выгоды в качестве картинки такого размера.
+        const val FILMSTRIP_WIDTH_PX = 320
+
         const val MAX_JPEG_LONG_SIDE_PX = 1280
         const val JPEG_QUALITY = 85
     }

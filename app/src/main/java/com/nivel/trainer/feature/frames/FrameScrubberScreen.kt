@@ -103,7 +103,8 @@ fun FrameScrubberScreen(
                 state = current,
                 slotLabel = if (slot == FrameSlot.BEFORE) "до" else "после",
                 onThumbnailSelected = viewModel::onThumbnailSelected,
-                onSliderChanged = { viewModel.onSliderChanged(it.roundToLong()) },
+                onSliderDragging = { viewModel.onSliderDragging(it.roundToLong()) },
+                onSliderReleased = { viewModel.onSliderReleased(it.roundToLong()) },
                 onExpandWindow = viewModel::onExpandWindow,
                 onCancel = onCancel,
                 onConfirm = { viewModel.onConfirm(cardId = cardId, slot = slot, onResult = onResult) },
@@ -141,7 +142,8 @@ private fun ReadyContent(
     state: FrameScrubberUiState.Ready,
     slotLabel: String,
     onThumbnailSelected: (Long) -> Unit,
-    onSliderChanged: (Float) -> Unit,
+    onSliderDragging: (Float) -> Unit,
+    onSliderReleased: (Float) -> Unit,
     onExpandWindow: () -> Unit,
     onCancel: () -> Unit,
     onConfirm: () -> Unit,
@@ -202,7 +204,8 @@ private fun ReadyContent(
         Spacer(Modifier.size(8.dp))
         Slider(
             value = state.selectedTimeMs.toFloat(),
-            onValueChange = onSliderChanged,
+            onValueChange = onSliderDragging,
+            onValueChangeFinished = { onSliderReleased(state.selectedTimeMs.toFloat()) },
             valueRange = state.windowStartMs.toFloat()..state.windowEndMs.coerceAtLeast(state.windowStartMs + 1).toFloat(),
             colors = SliderDefaults.colors(thumbColor = Primary, activeTrackColor = Primary, inactiveTrackColor = BorderDim),
             modifier = Modifier
